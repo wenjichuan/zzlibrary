@@ -1,27 +1,32 @@
 # zzlibrary
 
-面向个人的多端资料管理与阅读器（个人资料库）。核心特色是 **虚拟图书馆书架**：时间分段是书架层、三级分类是单座书架、二级分类是一排书架；Y-Z 侧视与 X-Z 比例时间轴（跨层年代对齐）两种视图。
+面向个人的多端资料管理与阅读器（个人资料库）。核心特色是 **虚拟图书馆书架**：时间分段是书架层、三级分类是单座书架、二级分类是一排书架；Y-Z 侧视与 X-Z 弹性时间轴长卷（跨层年代对齐）两种视图。
+
+正在转向**本地优先多端架构**（iOS/iPadOS/Android/鸿蒙/macOS/Windows + 用户自己的云作同步介质）：业务逻辑全部收进 `@zzlibrary/core`（纯 TS，所有端共用），新功能只写一份。
 
 ## 技术栈
 
-- **后端** `backend/`：Python FastAPI + SQLAlchemy + SQLite，单账号会话认证，EPUB/PDF/TXT/MD/HTML/docx/pptx/xlsx 元数据抽取与封面/书脊贴图后端渲染
+- **域核心** `packages/core`：纯 TS 业务逻辑（日期/时间分段/聚合/包状态/入库规则），全端共用
+- **服务端** `packages/server`：Hono + node:sqlite + sharp——API、入库、封面/书脊生成、Range 流；Node ≥ 24（用内置 node:sqlite）
 - **Web** `web/`：React 19 + TypeScript + Vite + Tailwind CSS
-- **共享包** `packages/shared`：TS 类型 + API 客户端（Web 与 Expo 共用）
-- **移动端** `mobile/`（规划中）：Expo + expo-gl，复用 3D 书架场景包
+- **共享包** `packages/shared`：TS 类型 + API 客户端
+- **移动端 / 桌面端**（规划中）：Expo（含鸿蒙 RNOH）/ Tauri，嵌入 core
 
 ## 开发
 
 ```bash
-# 后端（依赖装入 uv 管理的 base venv）
-uv pip install --python <你的base venv python> -r backend/pyproject.toml --extra dev
-cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# 前端（Node >= 20）
+# 服务端（Node >= 24）
 npm install
-npm run dev -w @zzlibrary/web   # http://localhost:5173，/api 代理到 8000
+npm run dev -w @zzlibrary/server   # :8000，ZZLIB_DATA_DIR / ZZLIB_PORT 可覆盖
+
+# 前端
+npm run dev -w @zzlibrary/web      # http://localhost:5173，/api 代理到 8000
+
+# 测试
+npm test -w @zzlibrary/core && npm test -w @zzlibrary/server
 ```
 
-默认账号 `admin / zzlibrary`（用环境变量 `ZZLIB_USERNAME` / `ZZLIB_PASSWORD` 修改，密码支持 pbkdf2 哈希：`python -m app.hash_password`）。
+默认账号 `admin / zzlibrary`（用环境变量 `ZZLIB_USERNAME` / `ZZLIB_PASSWORD` 修改，密码支持 pbkdf2 哈希）。
 
 ## 文档
 

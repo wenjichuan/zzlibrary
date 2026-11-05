@@ -1,0 +1,22 @@
+{
+  "name": "@zzlibrary/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zzlibrary/core": "*",
+    "@zzlibrary/shared": "*",
+    "@hono/node-server": "^1.14.0",
+    "hono": "^4.7.0",
+    "sharp": "^0.34.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

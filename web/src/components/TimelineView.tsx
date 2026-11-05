@@ -600,14 +600,11 @@ export function TimelineView({
                             .filter((b) => b.count > 0 && inViewX(b.left, b.right - b.left))
                             .map((b) => {
                               const width = Math.max(2, b.right - b.left);
-                              const full = b.seg.alias ? `${b.seg.label}（${b.seg.alias}）` : b.seg.label;
-                              // 放不下整串时优先显示别名（如「明」），再放不下显示范围数字
-                              const text =
-                                textWidth(full, 10.5) <= width - 10
-                                  ? full
-                                  : textWidth(b.seg.alias ?? "", 10.5) <= width - 8
-                                    ? b.seg.alias!
-                                    : b.seg.label;
+                              // 直接显示整串，能显示多少显示多少：放不下的部分由条带
+                              // overflow-hidden 截断（用户拍板：不要降级顺序，也不借用邻条）。
+                              // 完整信息始终在悬停 title / 段菜单里。
+                              const text = b.seg.alias ? `${b.seg.label}（${b.seg.alias}）` : b.seg.label;
+                              const textW = textWidth(text, 10.5);
                               return (
                                 <div
                                   key={b.seg.key}
@@ -625,7 +622,20 @@ export function TimelineView({
                                   }}
                                   title={`${b.seg.label}${b.seg.alias ? `（${b.seg.alias}）` : ""} · ${b.count} 包`}
                                 >
-                                  {text}
+                                  {/* 文字随视口在段带内滑移：滚进宽带内部（隋唐 1671px/拜占庭
+                                      2300px+）仍恒可见；marginLeft 夹在 [0, 段宽-文字宽]，
+                                      段尾过后随段滑出。（不用 sticky——overflow-hidden 条带盒
+                                      会吞掉 sticky） */}
+                                  <span
+                                    style={{
+                                      marginLeft: Math.max(
+                                        0,
+                                        Math.min(vp.x - b.left, width - textW - 10),
+                                      ),
+                                    }}
+                                  >
+                                    {text}
+                                  </span>
                                 </div>
                               );
                             })}
