@@ -1,0 +1,30 @@
+[project]
+name = "zzlibrary-backend"
+version = "0.1.0"
+description = "zzlibrary 个人电子图书管理与阅读器 - 后端"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.115",
+    "sqlalchemy>=2.0.36",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "itsdangerous>=2.2",
+    "Pillow>=11.0",
+    "ebooklib>=0.19",
+    "pypdfium2>=4.30",
+    "python-docx>=1.1.2",
+    "python-pptx>=1.0.2",
+    "openpyxl>=3.1.5",
+    "chardet>=5.2.0",
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

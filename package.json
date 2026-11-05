@@ -1,0 +1,11 @@
+{
+  "name": "zzlibrary",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "web"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

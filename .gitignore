@@ -1,0 +1,39 @@
+# 数据与运行时产物（不入库）
+data/
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+*.secret
+
+# Expo / React Native
+.expo/
+*.orig.*
+ios/
+android/
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ZCode 会话产物
+.zcode/
