@@ -4,11 +4,13 @@ import { HTTPException } from "hono/http-exception";
 
 export interface CategoryRow {
   id: number;
+  uuid: string;
   level: number;
   parent_id: number | null;
   name: string;
   sort_order: number;
   created_at: string;
+  updated_at: string;
 }
 
 export function getCategory(db: DatabaseSync, cid: number | null | undefined): CategoryRow | null {

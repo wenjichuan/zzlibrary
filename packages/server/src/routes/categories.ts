@@ -2,7 +2,10 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env";
+import { randomUUID } from "node:crypto";
 import { getCategory, type CategoryRow } from "../deps";
+import { nowSqlite } from "../db";
+import { recordTombstone } from "../sync-device";
 
 export const categoriesRouter = new Hono<Env>();
 
@@ -49,8 +52,8 @@ categoriesRouter.post("/api/categories", async (c) => {
     )
     .get(parentId) as { sort_order: number } | undefined;
   const node = db
-    .prepare("INSERT INTO categories (level, parent_id, name, sort_order, created_at) VALUES (?, ?, ?, ?, ?)")
-    .run(level, parentId, name, maxOrder ? maxOrder.sort_order + 1 : 0, new Date().toISOString().slice(0, 19).replace("T", " ") + ".000000");
+    .prepare("INSERT INTO categories (level, parent_id, name, sort_order, created_at, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(level, parentId, name, maxOrder ? maxOrder.sort_order + 1 : 0, nowSqlite(), nowSqlite(), randomUUID().replaceAll("-", ""));
   const id = Number(node.lastInsertRowid);
   return c.json({ id, level, parent_id: parentId, name, sort_order: maxOrder ? maxOrder.sort_order + 1 : 0, children: [] }, 201);
 });
@@ -94,12 +97,14 @@ categoriesRouter.patch("/api/categories/:cid", async (c) => {
       parentId = newParent.id;
     }
   }
-  db.prepare("UPDATE categories SET name = ?, sort_order = ?, parent_id = ? WHERE id = ?").run(
+  db.prepare("UPDATE categories SET name = ?, sort_order = ?, parent_id = ?, updated_at = ? WHERE id = ?").run(
     name,
     sortOrder,
     parentId,
+    nowSqlite(),
     cid,
   );
+  c.get("sync").queueLocalChange();
   return c.json({ id: cid, level: node.level, parent_id: parentId, name, sort_order: sortOrder });
 });
 
@@ -111,6 +116,12 @@ categoriesRouter.delete("/api/categories/:cid", (c) => {
   const hasChildren = db.prepare("SELECT id FROM categories WHERE parent_id = ? LIMIT 1").get(cid);
   if (hasChildren) throw new HTTPException(422, { message: "该分类包含子分类，请先删除子分类" });
   // 引用该分类的包路径由外键级联删除（FK ON DELETE CASCADE + PRAGMA foreign_keys=ON）
+  const cascaded = db
+    .prepare("SELECT uuid FROM package_paths WHERE l1_id = ? OR l2_id = ? OR l3_id = ?")
+    .all(cid, cid, cid) as Array<{ uuid: string }>;
+  for (const r of cascaded) recordTombstone(db, "package-paths", r.uuid);
+  recordTombstone(db, "categories", node.uuid);
   db.prepare("DELETE FROM categories WHERE id = ?").run(cid);
+  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });

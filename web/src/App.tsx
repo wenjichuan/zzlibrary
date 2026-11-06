@@ -7,6 +7,7 @@ import PackagesPage from "./pages/PackagesPage";
 import UploadPage from "./pages/UploadPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import SegmentPage from "./pages/SegmentPage";
+import SettingsPage from "./pages/SettingsPage";
 import LibraryPage from "./pages/LibraryPage";
 import { useAuth } from "./stores/auth";
 import { ToastProvider } from "./stores/toast";
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/upload" element={<Protected><UploadPage /></Protected>} />
         <Route path="/categories" element={<Protected><CategoriesPage /></Protected>} />
         <Route path="/segments" element={<Protected><SegmentPage /></Protected>} />
+        <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ToastProvider>

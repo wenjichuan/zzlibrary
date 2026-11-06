@@ -36,7 +36,7 @@ export default function LoginPage() {
         <div className="mb-6 flex flex-col items-center gap-1">
           <span className="text-4xl">🏛</span>
           <h1 className="text-lg font-semibold text-stone-800">zzlibrary · 个人资料库</h1>
-          <p className="text-xs text-stone-500">局域网多端资料管理与阅读</p>
+          <p className="text-xs text-stone-500">个人资料库 · 多端同步 · 随身阅读</p>
         </div>
         <div className="space-y-4">
           <Field label="用户名">

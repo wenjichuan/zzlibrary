@@ -8,24 +8,33 @@ import { getCategory, type CategoryRow } from "./deps";
 export interface FileRow {
   id: number;
   package_id: number;
+  uuid: string;
   name: string;
   format: string;
   file_path: string;
   file_size: number;
   page_count: number | null;
   sort_order: number;
+  /** 同步契约：内容哈希（回填前为 null，该文件暂不上云） */
+  sha256: string | null;
+  /** 设备本地标志：0=字节已释放（读取时透明取回） */
+  local: number;
+  updated_at: string;
 }
 
 export interface PackagePathRow {
   id: number;
   package_id: number;
+  uuid: string;
   l1_id: number;
   l2_id: number | null;
   l3_id: number | null;
+  updated_at: string;
 }
 
 export interface PackageRow {
   id: number;
+  uuid: string;
   title: string;
   authors: string; // JSON text
   publish_date: string | null;
@@ -37,6 +46,10 @@ export interface PackageRow {
   total_size: number;
   created_at: string;
   updated_at: string;
+  /** 真封面内容哈希（null=占位封面，本地生成不同步） */
+  cover_sha256: string | null;
+  /** 书脊调色板 JSON（释放封面后书脊颜色稳定） */
+  palette: string | null;
 }
 
 export interface ProgressRow {

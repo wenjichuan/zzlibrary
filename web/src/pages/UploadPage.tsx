@@ -5,6 +5,7 @@ import PackageMetaForm, { emptyMeta, metaToInput, type MetaFormValue } from "../
 import { Button, Input, PageHeader } from "../components/ui";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
+import { renderPdfCover } from "../utils/pdfCover";
 
 /** 已暂存文件 */
 interface StagedItem {
@@ -99,7 +100,9 @@ export default function UploadPage() {
         const item = newItems[i];
         const file = list[i];
         try {
-          const staged = await api.stageFile(file);
+          // PDF 首页封面：入库即带真封面（客户端渲染，无服务端原生依赖）
+          const cover = file.name.toLowerCase().endsWith(".pdf") ? await renderPdfCover(file) : null;
+          const staged = await api.stageFile(file, cover);
           liveStages.current.set(item.key, staged.stage_id);
           setItems((prev) => prev.map((it) => (it.key === item.key ? { ...it, staged } : it)));
           // 首个文件抽取到的元数据预填表单（只做一次，避免后续文件反复覆盖用户输入）

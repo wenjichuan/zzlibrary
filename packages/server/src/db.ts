@@ -7,9 +7,20 @@ import { randomUUID } from "node:crypto";
 import { cleanPackageName } from "@zzlibrary/core";
 import type { Settings } from "./config";
 
-/** UTC 当前时刻 → 与 SQLAlchemy DateTime 存储一致的定宽文本（含 6 位微秒）。 */
+/** UTC 当前时刻 → 与 SQLAlchemy DateTime 存储一致的定宽文本（含 6 位微秒）。
+ * 设备内严格单调（同毫秒/时钟回拨时推进 1ms）——同步 LWW 的时间戳依据。 */
+let lastNowMs = 0;
 export function nowSqlite(): string {
-  return new Date().toISOString().slice(0, 19).replace("T", " ") + ".000000";
+  const wall = Date.now();
+  const ms = wall > lastNowMs ? wall : lastNowMs + 1;
+  lastNowMs = ms;
+  const d = new Date(ms);
+  return (
+    d.toISOString().slice(0, 19).replace("T", " ") +
+    "." +
+    String(d.getUTCMilliseconds()).padStart(3, "0") +
+    "000"
+  );
 }
 
 /** Date → 同上格式（毫秒截断到微秒位补零）。 */
@@ -108,7 +119,9 @@ function columnsOf(db: DatabaseSync, table: string): Set<string> {
  * 1) 建表（新库）；
  * 2) uuid 回填——packages/files/categories/package_paths 增加 uuid 列（TEXT 32hex + 唯一索引），
  *    作为跨端同步契约的实体身份（本地整型主键保留为设备内代理键）；
- * 3) 无 uuid 的旧行补齐。幂等。 */
+ * 3) 无 uuid 的旧行补齐；
+ * 4) 同步契约列（updated_at / files.sha256 / files.local / packages.cover_sha256+palette）
+ *    与同步状态表。幂等。 */
 export function migrate(db: DatabaseSync): void {
   db.exec(DDL);
   for (const table of ["packages", "files", "categories", "package_paths"]) {
@@ -124,6 +137,61 @@ export function migrate(db: DatabaseSync): void {
         fill.run(randomUUID().replaceAll("-", ""), row.id);
       }
     }
+  }
+  // 同步契约列（幂等）
+  const backfill = nowSqlite();
+  addColumn(db, "files", "sha256", "TEXT");
+  addColumn(db, "files", "local", "INTEGER NOT NULL DEFAULT 1");
+  addColumn(db, "files", "updated_at", "DATETIME", backfill);
+  addColumn(db, "package_paths", "updated_at", "DATETIME", backfill);
+  addColumn(db, "categories", "updated_at", "DATETIME"); // 下方按 created_at 回填
+  addColumn(db, "packages", "cover_sha256", "TEXT");
+  addColumn(db, "packages", "palette", "TEXT");
+  addColumn(db, "segment_configs", "updated_at", "DATETIME", backfill);
+  db.exec("UPDATE categories SET updated_at = COALESCE(updated_at, created_at)");
+  // 同步状态表（设备本地，不同步自身）
+  db.exec(`
+CREATE TABLE IF NOT EXISTS sync_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync_manifest_cache (
+  path TEXT PRIMARY KEY,
+  sha256 TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync_blob_cache (
+  sha256 TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS sync_baselines (
+  path TEXT PRIMARY KEY,
+  env TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  path TEXT PRIMARY KEY,
+  updated_at TEXT NOT NULL,
+  blob_refs TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_files_sha256 ON files (sha256);
+`);
+  // 墓碑携带内容块引用（删除记账在云端墓碑里，任何设备可 GC）；旧表补列
+  addColumn(db, "sync_tombstones", "blob_refs", "TEXT");
+  // 移除短暂的本地 GC 记账表（方案改为云端墓碑记账）
+  db.exec("DROP TABLE IF EXISTS sync_gc_pending");
+}
+
+function addColumn(
+  db: DatabaseSync,
+  table: string,
+  column: string,
+  typeClause: string,
+  backfillValue?: string,
+): void {
+  const cols = columnsOf(db, table);
+  if (cols.has(column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${typeClause}`);
+  if (backfillValue !== undefined) {
+    db.prepare(`UPDATE ${table} SET ${column} = COALESCE(${column}, ?)`).run(backfillValue);
   }
 }
 

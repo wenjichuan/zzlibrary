@@ -29,6 +29,8 @@ export interface FileItem {
 
 export interface FileDetail extends FileItem {
   has_cover: boolean;
+  /** 设备本地是否有字节（false=云端，读取时透明取回） */
+  local?: boolean;
   progress: Progress | null;
 }
 
@@ -63,6 +65,10 @@ export interface Package {
 
 export interface PackageDetail extends Package {
   files: FileDetail[];
+  /** 是否有真封面（false=本地生成的占位封面；存量 PDF 补齐用） */
+  has_real_cover?: boolean;
+  /** 是否可安全释放本地字节（已配置云且本地现存内容全部确认上云） */
+  can_release?: boolean;
 }
 
 export interface PackagePage {
@@ -191,4 +197,47 @@ export interface Progress {
   locator: Record<string, unknown>;
   percent: number;
   updated_at: string;
+}
+
+// ---------- 同步与备份 ----------
+
+export interface SyncConfig {
+  provider: "fs" | "webdav" | "s3";
+  autoSync: boolean;
+  fs?: { root: string };
+  webdav?: { baseUrl: string; username?: string; password?: string; rootPath?: string };
+  s3?: {
+    endpoint: string; region: string; bucket: string;
+    accessKeyId: string; secretAccessKey: string; prefix?: string;
+  };
+}
+
+export interface SyncReport {
+  pull: {
+    cloudEmpty: boolean; fetched: number; applied: number; localNewer: number;
+    tombstones: number; noop: number; errors: string[]; revision: number;
+  };
+  push: {
+    uploadedManifests: number; tombstoned: number; uploadedBlobs: number;
+    uploadedBlobBytes: number; skippedNoBlob: number; revision: number; errors: string[];
+  };
+}
+
+export interface GcReport {
+  tombstonesRemoved: number;
+  blobsRemoved: number;
+  blobBytesRemoved: number;
+  blobsSkippedReferenced: number;
+  errors: string[];
+}
+
+export interface SyncStatus {
+  configured: boolean;
+  autoSync: boolean;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  lastReport: SyncReport | null;
+  revision: number;
+  pendingHashFiles: number;
+  running: boolean;
 }

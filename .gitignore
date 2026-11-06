@@ -37,3 +37,14 @@ Thumbs.db
 
 # ZCode 会话产物
 .zcode/
+
+# 本地端到端演练产物（临时实例/云/测试素材）
+.e2e-data/
+.e2e-cloud/
+.e2e-assets/
+.drill-data/
+.drill-cloud/
+.drill-a.mjs
+.drill-b.mjs
+.drill-data-b/
+.verify-restore/

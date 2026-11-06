@@ -7,6 +7,7 @@ const NAV = [
   { to: "/upload", label: "入库", icon: "📥" },
   { to: "/categories", label: "分类", icon: "🗂" },
   { to: "/segments", label: "时间分段", icon: "🕰" },
+  { to: "/settings", label: "设置", icon: "⚙" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {

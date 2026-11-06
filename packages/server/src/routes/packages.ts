@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { detectFormat, displayDate, parsePartialDate } from "@zzlibrary/core";
@@ -33,7 +33,12 @@ import {
 } from "../repo";
 import { nowSqlite } from "../db";
 import { extractMeta } from "../extract";
-import { makePlaceholderCover, regeneratePackageArt } from "../art";
+import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
+import { recordPackageTombstones, recordTombstone } from "../sync-device";
+
+function sha256Of(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
 
 export const packagesRouter = new Hono<Env>();
 
@@ -103,6 +108,7 @@ function packageDetail(
   const base = packageOut(db, pkg, new Map());
   return {
     ...base,
+    has_real_cover: pkg.row.cover_sha256 !== null,
     files: pkg.files.map((f) => ({
       id: f.id,
       name: f.name,
@@ -111,6 +117,7 @@ function packageDetail(
       page_count: f.page_count,
       sort_order: f.sort_order,
       has_cover: existsSync(fileCoverPath(settings, f)),
+      local: f.local === 1 && existsSync(join(settings.dataDir, f.file_path)),
       progress: progressOut(getProgress(db, f.id)),
     })),
   };
@@ -131,6 +138,7 @@ function runStage(
   settings: Env["Variables"]["settings"],
   filename: string,
   buffer: Buffer,
+  coverBytes?: Uint8Array,
 ): StageResult {
   const fmt = detectFormat(filename); // 不限格式：未知扩展名原样登记
   const stageId = randomUUID().replaceAll("-", "");
@@ -141,9 +149,12 @@ function runStage(
   const size = buffer.length;
 
   const meta = extractMeta(target, buffer, filename, fmt);
-  const hasCover = meta.cover !== null;
+  const hasCover = meta.cover !== null || coverBytes !== undefined;
   if (meta.cover !== null) {
     writeFileSync(join(stagingDir, "cover.png"), meta.cover);
+  } else if (coverBytes !== undefined) {
+    // 客户端渲染的封面（PDF 首页）——服务端零原生依赖的全端通用方案
+    writeFileSync(join(stagingDir, "cover.png"), coverBytes);
   }
   writeFileSync(
     join(stagingDir, "meta.json"),
@@ -167,7 +178,9 @@ packagesRouter.post("/api/packages/stage", async (c) => {
   }
   const filename = upload.name;
   const buffer = Buffer.from(await upload.arrayBuffer());
-  const result = runStage(settings, filename, buffer);
+  const coverUpload = body.cover;
+  const coverBytes = coverUpload instanceof File ? new Uint8Array(await coverUpload.arrayBuffer()) : undefined;
+  const result = runStage(settings, filename, buffer, coverBytes);
   return c.json({
     stage_id: result.stageId,
     filename: result.filename,
@@ -266,10 +279,10 @@ packagesRouter.post("/api/packages", async (c) => {
     );
   const pkgId = Number(ins.lastInsertRowid);
   const insertPath = db.prepare(
-    "INSERT INTO package_paths (package_id, l1_id, l2_id, l3_id, uuid) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO package_paths (package_id, l1_id, l2_id, l3_id, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?)",
   );
   for (const [l1, l2, l3] of resolvedPaths) {
-    insertPath.run(pkgId, l1, l2, l3, randomUUID().replaceAll("-", ""));
+    insertPath.run(pkgId, l1, l2, l3, nowSqlite(), randomUUID().replaceAll("-", ""));
   }
 
   let packageCover: Buffer | null = null;
@@ -278,11 +291,12 @@ packagesRouter.post("/api/packages", async (c) => {
   mkdirSync(pkgDir, { recursive: true });
   let order = 0;
   for (const { dir, info } of staged) {
+    const stagedBytes = readFileSync(join(dir, "file"));
     const f = db
       .prepare(
-        "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?)",
+        "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
       )
-      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, randomUUID().replaceAll("-", ""));
+      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
     const fileId = Number(f.lastInsertRowid);
     const dest = join(pkgDir, `${fileId}_${info.filename}`);
     renameSync(join(dir, "file"), dest);
@@ -302,7 +316,14 @@ packagesRouter.post("/api/packages", async (c) => {
   syncCounts(db, pkgId);
   recomputePackageStatus(db, pkgId); // 入库即对齐：纯不可读格式包为中性 ""
   await regeneratePackageArt(settings.artDir, pkgId, title, packageCover);
+  const palette = await paletteFromCover(packageCover, title);
+  db.prepare("UPDATE packages SET palette = ?, cover_sha256 = ? WHERE id = ?").run(
+    JSON.stringify(palette),
+    packageCover === null ? null : sha256Of(new Uint8Array(packageCover)),
+    pkgId,
+  );
   for (const { dir } of staged) rmSync(dir, { recursive: true, force: true });
+  c.get("sync").queueLocalChange();
   return c.json(packageDetail(settings, db, getPackageOr404(db, pkgId)), 201);
 });
 
@@ -408,7 +429,8 @@ function parseIdFilterNullable(raw: string | null | undefined): [number | null, 
 
 packagesRouter.get("/api/packages/:id", (c) => {
   const pkg = getPackageOr404(c.get("db"), Number(c.req.param("id")));
-  return c.json(packageDetail(c.get("settings"), c.get("db"), pkg));
+  // 释放本地空间的安全前提（云端确认有全部字节副本）；UI 据此显示按钮，释放端点再硬校验
+  return c.json({ ...packageDetail(c.get("settings"), c.get("db"), pkg), can_release: c.get("sync").canRelease(pkg.row.id).ok });
 });
 
 packagesRouter.patch("/api/packages/:id", async (c) => {
@@ -424,10 +446,10 @@ packagesRouter.patch("/api/packages/:id", async (c) => {
     const resolved = resolvePaths(db, meta.classifications);
     db.prepare("DELETE FROM package_paths WHERE package_id = ?").run(pkgId);
     const insertPath = db.prepare(
-      "INSERT INTO package_paths (package_id, l1_id, l2_id, l3_id, uuid) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO package_paths (package_id, l1_id, l2_id, l3_id, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?)",
     );
     for (const [l1, l2, l3] of resolved) {
-      insertPath.run(pkgId, l1, l2, l3, randomUUID().replaceAll("-", ""));
+      insertPath.run(pkgId, l1, l2, l3, nowSqlite(), randomUUID().replaceAll("-", ""));
     }
   }
 
@@ -467,7 +489,10 @@ packagesRouter.patch("/api/packages/:id", async (c) => {
     const coverPath = join(settings.artDir, "covers", `${pkgId}.png`);
     const coverImg = existsSync(coverPath) ? readFileSync(coverPath) : null;
     await regeneratePackageArt(settings.artDir, pkgId, meta.title.trim(), coverImg);
+    const palette = await paletteFromCover(coverImg, meta.title.trim());
+    db.prepare("UPDATE packages SET palette = ? WHERE id = ?").run(JSON.stringify(palette), pkgId);
   }
+  c.get("sync").queueLocalChange();
   return c.json(packageDetail(settings, db, getPackageOr404(db, pkgId)));
 });
 
@@ -485,7 +510,9 @@ packagesRouter.delete("/api/packages/:id", (c) => {
     const fc = fileCoverPath(settings, f);
     if (existsSync(fc)) unlinkSync(fc);
   }
+  recordPackageTombstones(db, pkg);
   db.prepare("DELETE FROM packages WHERE id = ?").run(pkg.row.id);
+  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });
 
@@ -509,11 +536,12 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
   };
 
   const maxOrder = pkg.files.reduce((m, f) => Math.max(m, f.sort_order), -1);
+  const stagedBytes = readFileSync(join(stagingDir, "file"));
   const ins = db
     .prepare(
-      "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?)",
+      "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
     )
-    .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, randomUUID().replaceAll("-", ""));
+    .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
   const fileId = Number(ins.lastInsertRowid);
   const dir = packageDir(settings, pkg);
   mkdirSync(dir, { recursive: true });
@@ -537,8 +565,13 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
   // 包封面缺失时用新文件封面补上
   if (coverImg !== null && !existsSync(join(settings.artDir, "covers", `${pkgId}.png`))) {
     await regeneratePackageArt(settings.artDir, pkgId, pkg.row.title, coverImg);
+    const palette = await paletteFromCover(coverImg, pkg.row.title);
+    db.prepare("UPDATE packages SET palette = ?, cover_sha256 = ? WHERE id = ?").run(
+      JSON.stringify(palette), sha256Of(new Uint8Array(coverImg)), pkgId,
+    );
   }
   rmSync(stagingDir, { recursive: true, force: true });
+  c.get("sync").queueLocalChange();
   return c.json(
     {
       id: fileId,
@@ -574,8 +607,11 @@ packagesRouter.patch("/api/packages/:id/files/:fileId", async (c) => {
     params.push(payload.sort_order);
   }
   if (sets.length > 0) {
+    sets.push("updated_at = ?");
+    params.push(nowSqlite());
     params.push(fileId);
     db.prepare(`UPDATE files SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+    c.get("sync").queueLocalChange();
   }
   const updated = loadFiles(db, pkgId).find((x) => x.id === fileId)!;
   return c.json({
@@ -607,9 +643,13 @@ packagesRouter.delete("/api/packages/:id/files/:fileId", (c) => {
   if (existsSync(filePath)) unlinkSync(filePath);
   const fc = fileCoverPath(settings, f);
   if (existsSync(fc)) unlinkSync(fc);
+  recordTombstone(db, "files", f.uuid,
+    typeof f.sha256 === "string" && f.sha256 !== "" ? [{ sha256: f.sha256, size: f.file_size }] : undefined);
+  recordTombstone(db, "progress", f.uuid);
   db.prepare("DELETE FROM files WHERE id = ?").run(fileId);
   syncCounts(db, pkgId);
   recomputePackageStatus(db, pkgId); // 删文件同理（如移除最后一个未读文件→已读）
+  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });
 
@@ -627,13 +667,52 @@ function serveFile(c: Context<Env>, path: string, mediaType: string) {
 packagesRouter.get("/api/packages/:id/cover", async (c) => {
   const db = c.get("db");
   const settings = c.get("settings");
+  const sync = c.get("sync");
   const pkg = getPackageOr404(db, Number(c.req.param("id")));
   const path = join(settings.artDir, "covers", `${pkg.row.id}.png`);
   if (!existsSync(path)) {
-    mkdirSync(join(settings.artDir, "covers"), { recursive: true });
-    writeFileSync(path, await makePlaceholderCover(pkg.row.title, await (await import("../art")).paletteFromCover(null, pkg.row.title)));
+    // 真封面在云端 → 取回；没有真封面 → 本地确定性占位（palette 优先用列内缓存，释放后颜色不变）
+    const fetched = await sync.ensureCoverLocal(pkg.row.id).catch(() => null);
+    if (fetched === null) {
+      mkdirSync(join(settings.artDir, "covers"), { recursive: true });
+      const paletteRow = db.prepare("SELECT palette FROM packages WHERE id = ?").get(pkg.row.id) as { palette: string | null } | undefined;
+      let palette: Awaited<ReturnType<typeof paletteFromCover>> | null = null;
+      if (paletteRow?.palette) {
+        try {
+          palette = JSON.parse(paletteRow.palette);
+        } catch {
+          palette = null;
+        }
+      }
+      writeFileSync(path, await makePlaceholderCover(pkg.row.title, palette ?? (await paletteFromCover(null, pkg.row.title))));
+    }
   }
   return serveFile(c, path, "image/png");
+});
+
+/** 客户端渲染封面上传（PDF 首页补齐）：规范化入库并更新 cover_sha256/palette。 */
+packagesRouter.put("/api/packages/:id/cover", async (c) => {
+  const db = c.get("db");
+  const settings = c.get("settings");
+  const pkgId = Number(c.req.param("id"));
+  const pkg = getPackageOr404(db, pkgId);
+  const body = await c.req.parseBody();
+  const upload = body.cover;
+  if (!(upload instanceof File)) throw new HTTPException(422, { message: "缺少 cover 文件" });
+  const raw = Buffer.from(await upload.arrayBuffer());
+  const normalized = await normalizeCover(raw, pkg.row.title);
+  mkdirSync(join(settings.artDir, "covers"), { recursive: true });
+  writeFileSync(join(settings.artDir, "covers", `${pkgId}.png`), normalized);
+  const spinePath = join(settings.artDir, "spines", `${pkgId}.png`);
+  if (existsSync(spinePath)) unlinkSync(spinePath); // 书脊按新封面重生成
+  const palette = await paletteFromCover(normalized, pkg.row.title);
+  db.prepare("UPDATE packages SET cover_sha256 = ?, palette = ? WHERE id = ?").run(
+    sha256Of(new Uint8Array(normalized)),
+    JSON.stringify(palette),
+    pkgId,
+  );
+  c.get("sync").queueLocalChange();
+  return c.json({ ok: true, real: true });
 });
 
 packagesRouter.get("/api/packages/:id/spine", async (c) => {
@@ -660,15 +739,23 @@ packagesRouter.get("/api/files/:fileId/cover", (c) => {
   return serveFile(c, path, "image/png");
 });
 
-packagesRouter.get("/api/files/:fileId/file", (c) => {
+packagesRouter.get("/api/files/:fileId/file", async (c) => {
   const settings = c.get("settings");
+  const sync = c.get("sync");
   const fileId = Number(c.req.param("fileId"));
   const f = c.get("db").prepare("SELECT * FROM files WHERE id = ?").get(fileId) as
     | FileRow
     | undefined;
   if (!f) throw new HTTPException(404, { message: "文件不存在" });
-  const path = join(settings.dataDir, f.file_path);
-  if (!existsSync(path)) throw new HTTPException(404, { message: "文件缺失" });
+  let path = join(settings.dataDir, f.file_path);
+  if (!existsSync(path)) {
+    // 透明取回：本地已释放 → 云端拉回缓存再伺服
+    try {
+      path = await sync.ensureFileLocal(fileId);
+    } catch (err) {
+      throw new HTTPException(404, { message: err instanceof Error ? err.message : "文件缺失" });
+    }
+  }
   const mediaType = MEDIA_TYPES[f.format] ?? "application/octet-stream";
   return serveWithRange(c, path, mediaType);
 });

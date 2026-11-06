@@ -5,6 +5,8 @@ import { HTTPException } from "hono/http-exception";
 import { parseRange } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { getCategory } from "../deps";
+import { nowSqlite } from "../db";
+import { recordTombstone } from "../sync-device";
 
 export const segmentConfigRouter = new Hono<Env>();
 
@@ -74,15 +76,16 @@ function upsert(
   const paramsText = JSON.stringify(payload.params ?? {});
   if (existing === undefined) {
     db.prepare(
-      "INSERT INTO segment_configs (scope, l2_id, l3_id, mode, params) VALUES (?, ?, ?, ?, ?)",
-    ).run(scope, l2Id, l3Id, payload.mode, paramsText);
+      "INSERT INTO segment_configs (scope, l2_id, l3_id, mode, params, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(scope, l2Id, l3Id, payload.mode, paramsText, nowSqlite());
     return db
       .prepare("SELECT * FROM segment_configs WHERE scope = ? AND l2_id IS ? AND l3_id IS ?")
       .get(scope, l2Id, l3Id) as ConfigRow;
   }
-  db.prepare("UPDATE segment_configs SET mode = ?, params = ? WHERE id = ?").run(
+  db.prepare("UPDATE segment_configs SET mode = ?, params = ?, updated_at = ? WHERE id = ?").run(
     payload.mode,
     paramsText,
+    nowSqlite(),
     existing.id,
   );
   return { ...existing, mode: payload.mode, params: paramsText };
@@ -109,7 +112,9 @@ segmentConfigRouter.put("/api/segment-config", async (c) => {
     .json<{ mode?: string; params?: Record<string, unknown> }>()
     .catch(() => ({}) as never);
   validate(payload);
-  return c.json(out(upsert(c.get("db"), "global", null, null, payload as { mode: string; params: Record<string, unknown> })));
+  const result = out(upsert(c.get("db"), "global", null, null, payload as { mode: string; params: Record<string, unknown> }));
+  c.get("sync").queueLocalChange();
+  return c.json(result);
 });
 
 segmentConfigRouter.put("/api/segment-config/:l2Id", async (c) => {
@@ -121,7 +126,9 @@ segmentConfigRouter.put("/api/segment-config/:l2Id", async (c) => {
     .json<{ mode?: string; params?: Record<string, unknown> }>()
     .catch(() => ({}) as never);
   validate(payload);
-  return c.json(out(upsert(db, "l2", l2Id, null, payload as { mode: string; params: Record<string, unknown> })));
+  const result = out(upsert(db, "l2", l2Id, null, payload as { mode: string; params: Record<string, unknown> }));
+  c.get("sync").queueLocalChange();
+  return c.json(result);
 });
 
 segmentConfigRouter.delete("/api/segment-config/:l2Id", (c) => {
@@ -131,7 +138,9 @@ segmentConfigRouter.delete("/api/segment-config/:l2Id", (c) => {
     .prepare("SELECT * FROM segment_configs WHERE scope = 'l2' AND l2_id = ?")
     .get(l2Id) as ConfigRow | undefined;
   if (cfg === undefined) throw new HTTPException(404, { message: "该二级分类没有覆盖配置" });
+  recordTombstone(db, "segment-configs", `l2-${(getCategory(db, l2Id) as { uuid: string }).uuid}`);
   db.prepare("DELETE FROM segment_configs WHERE id = ?").run(cfg.id);
+  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });
 
@@ -146,7 +155,9 @@ segmentConfigRouter.put("/api/segment-config/l3/:l3Id", async (c) => {
     .json<{ mode?: string; params?: Record<string, unknown> }>()
     .catch(() => ({}) as never);
   validate(payload);
-  return c.json(out(upsert(db, "l3", l3.parent_id, l3Id, payload as { mode: string; params: Record<string, unknown> })));
+  const result = out(upsert(db, "l3", l3.parent_id, l3Id, payload as { mode: string; params: Record<string, unknown> }));
+  c.get("sync").queueLocalChange();
+  return c.json(result);
 });
 
 segmentConfigRouter.delete("/api/segment-config/l3/:l3Id", (c) => {
@@ -156,6 +167,8 @@ segmentConfigRouter.delete("/api/segment-config/l3/:l3Id", (c) => {
     .prepare("SELECT * FROM segment_configs WHERE scope = 'l3' AND l3_id = ?")
     .get(l3Id) as ConfigRow | undefined;
   if (cfg === undefined) throw new HTTPException(404, { message: "该三级分类没有覆盖配置" });
+  recordTombstone(db, "segment-configs", `l3-${(getCategory(db, l3Id) as { uuid: string }).uuid}`);
   db.prepare("DELETE FROM segment_configs WHERE id = ?").run(cfg.id);
+  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });

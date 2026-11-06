@@ -10,12 +10,14 @@ import { Settings } from "./config";
 import { openDb, migrate, migratePackageDirs, purgeStaleStaging } from "./db";
 import { SessionManager, SESSION_COOKIE } from "./security";
 import { recomputeAllPackageStatuses } from "./repo";
+import { SyncService } from "./sync";
 import { authRouter } from "./routes/auth";
 import { categoriesRouter } from "./routes/categories";
 import { packagesRouter } from "./routes/packages";
 import { shelvesRouter } from "./routes/shelves";
 import { segmentConfigRouter } from "./routes/segmentConfig";
 import { progressRouter } from "./routes/progress";
+import { syncRouter } from "./routes/sync";
 
 export function createApp(settings = new Settings()): Hono<Env> {
   settings.ensureDirs();
@@ -35,6 +37,17 @@ export function createApp(settings = new Settings()): Hono<Env> {
   }
 
   const app = new Hono<Env>();
+  const sync = new SyncService(settings, db);
+
+  // 启动补同步：防抖窗口内关机/上次失败未补的变更，重启即追上（顺带拉取其他设备的远端变更）
+  if (sync.loadConfig()?.autoSync) {
+    const bootTimer = setTimeout(() => {
+      sync.runSync().catch((err) =>
+        console.error("启动同步失败：", err instanceof Error ? err.message : err),
+      );
+    }, 2000);
+    bootTimer.unref?.(); // 不阻止进程退出
+  }
 
   if (settings.corsOrigins) {
     const origins = settings.corsOrigins
@@ -68,6 +81,7 @@ export function createApp(settings = new Settings()): Hono<Env> {
     c.set("settings", settings);
     c.set("sessions", sessions);
     c.set("db", db);
+    c.set("sync", sync);
     return next();
   });
 
@@ -77,6 +91,7 @@ export function createApp(settings = new Settings()): Hono<Env> {
   app.route("/", shelvesRouter);
   app.route("/", segmentConfigRouter);
   app.route("/", progressRouter);
+  app.route("/", syncRouter);
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
@@ -91,7 +106,11 @@ export function createApp(settings = new Settings()): Hono<Env> {
       if (path.startsWith("/assets/")) {
         const filePath = join(dist, path.slice(1));
         if (existsSync(filePath)) {
-          const ext = path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css" : "application/octet-stream";
+          const ext = path.endsWith(".js") || path.endsWith(".mjs")
+            ? "text/javascript"
+            : path.endsWith(".css")
+              ? "text/css"
+              : "application/octet-stream";
           return c.body(readFileSync(filePath) as unknown as ReadableStream, 200, {
             "Content-Type": ext,
           });

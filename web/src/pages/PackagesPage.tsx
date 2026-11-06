@@ -5,6 +5,8 @@ import { Button, Empty, Input, Modal, PageHeader, Select, Spinner } from "../com
 import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
 import { prettyDate } from "../components/shelfVM";
+import ReaderOverlay, { readableFormat } from "../components/ReaderOverlay";
+import { renderPdfCover } from "../utils/pdfCover";
 
 const FORMATS = [
   "", "epub", "pdf", "txt", "md", "html", "docx", "pptx", "xlsx",
@@ -50,6 +52,7 @@ export default function PackagesPage() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<PackageDetail | null>(null);
   const [detail, setDetail] = useState<PackageDetail | null>(null);
+  const [reading, setReading] = useState<FileDetail | null>(null);
   const { push } = useToast();
   const loadCategories = useCategories((s) => s.load);
   const tree = useCategories((s) => s.tree);
@@ -83,6 +86,14 @@ export default function PackagesPage() {
     const n = l2.find((x) => String(x.id) === filters.l2);
     return filters.l2 ? (n?.children ?? []) : [];
   })();
+
+  const openDetailById = async (id: number) => {
+    try {
+      setDetail(await api.getPackage(id));
+    } catch {
+      /* 刷新失败保持旧态 */
+    }
+  };
 
   const openDetail = async (pkg: Package) => {
     try {
@@ -272,6 +283,17 @@ export default function PackagesPage() {
             setEditing(detail);
             setDetail(null);
           }}
+          onRead={(file) => setReading(file)}
+          onRefresh={() => void openDetailById(detail.id)}
+        />
+      )}
+      {reading !== null && detail !== null && (
+        <ReaderOverlay
+          pkgTitle={detail.title}
+          file={reading}
+          initialProgress={reading.progress}
+          onClose={() => setReading(null)}
+          onProgress={() => void openDetailById(detail.id)}
         />
       )}
       {editing && (
@@ -288,9 +310,13 @@ export default function PackagesPage() {
   );
 }
 
-function FileRow({ file, showProgress }: { file: FileDetail; showProgress?: boolean }) {
+function FileRow({ file, showProgress, onRead }: { file: FileDetail; showProgress?: boolean; onRead?: (f: FileDetail) => void }) {
+  const readable = readableFormat(file.format);
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-stone-100 px-3 py-2 hover:bg-stone-50">
+    <div
+      className={"flex items-center gap-3 rounded-lg border border-stone-100 px-3 py-2 hover:bg-stone-50 " + (readable && onRead ? "cursor-pointer" : "")}
+      onClick={readable && onRead ? () => onRead(file) : undefined}
+    >
       <div className="h-10 w-8 shrink-0 overflow-hidden rounded bg-stone-100">
         {file.has_cover ? (
           <img src={api.fileCoverUrl(file.id)} className="h-full w-full object-cover" alt="" />
@@ -308,14 +334,24 @@ function FileRow({ file, showProgress }: { file: FileDetail; showProgress?: bool
           {showProgress && file.progress ? ` · 已看 ${Math.round(file.progress.percent)}%` : ""}
         </div>
       </div>
-      <a
-        className="rounded-lg border border-stone-300 px-2.5 py-1.5 text-xs text-stone-700 hover:border-amber-600 hover:text-amber-800"
-        href={api.fileUrl(file.id)}
-        target="_blank"
-        rel="noreferrer"
-      >
-        打开
-      </a>
+      <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+        {readable && onRead && (
+          <button
+            className="rounded-lg border border-amber-600 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 hover:bg-amber-100"
+            onClick={() => onRead(file)}
+          >
+            阅读
+          </button>
+        )}
+        <a
+          className="rounded-lg border border-stone-300 px-2.5 py-1.5 text-xs text-stone-700 hover:border-amber-600 hover:text-amber-800"
+          href={api.fileUrl(file.id)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          打开
+        </a>
+      </div>
     </div>
   );
 }
@@ -324,11 +360,34 @@ function DetailModal({
   detail,
   onClose,
   onEdit,
+  onRead,
+  onRefresh,
 }: {
   detail: PackageDetail;
   onClose: () => void;
   onEdit: () => void;
+  onRead: (file: FileDetail) => void;
+  onRefresh: () => void;
 }) {
+  const { push } = useToast();
+  const [releasing, setReleasing] = useState(false);
+  const lastRead = [...detail.files]
+    .filter((f) => f.progress !== null)
+    .sort((a, b) => (b.progress!.updated_at < a.progress!.updated_at ? -1 : 1))[0] ?? null;
+  const anyLocal = detail.files.some((f) => f.local !== false);
+
+  const release = async () => {
+    setReleasing(true);
+    try {
+      const r = await api.releasePackage(detail.id);
+      push("success", `已释放 ${r.releasedFiles} 个文件（${formatBytes(r.freedBytes)}），阅读时会自动从云端取回`);
+      onRefresh();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "释放失败");
+    } finally {
+      setReleasing(false);
+    }
+  };
   return (
     <Modal title="资料包详情" onClose={onClose} wide>
       <div className="grid grid-cols-[160px_1fr] gap-5">
@@ -359,10 +418,26 @@ function DetailModal({
         </div>
       </div>
       <div className="mt-4">
-        <div className="mb-2 text-sm font-semibold text-stone-700">包内文件（{detail.files.length}）</div>
+        {lastRead !== null && (
+          <button
+            className="mb-2 flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
+            onClick={() => onRead(lastRead)}
+          >
+            <span>继续读 · {lastRead.name}</span>
+            <span className="text-xs text-amber-700">上次 {Math.round(lastRead.progress!.percent)}%</span>
+          </button>
+        )}
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm font-semibold text-stone-700">包内文件（{detail.files.length}）</span>
+          {anyLocal && detail.can_release === true && (
+            <button className="text-xs text-stone-400 hover:text-red-600" disabled={releasing} onClick={() => void release()}>
+              {releasing ? "释放中…" : "释放本地空间"}
+            </button>
+          )}
+        </div>
         <div className="space-y-2">
           {detail.files.map((f) => (
-            <FileRow key={f.id} file={f} showProgress />
+            <FileRow key={f.id} file={f} showProgress onRead={onRead} />
           ))}
         </div>
       </div>
@@ -400,7 +475,8 @@ function EditModal({
   const addFiles = async (list: FileList) => {
     for (const file of Array.from(list)) {
       try {
-        const staged = await api.stageFile(file);
+        const cover = file.name.toLowerCase().endsWith(".pdf") ? await renderPdfCover(file) : null;
+        const staged = await api.stageFile(file, cover);
         setPendingAdds((prev) => [
           ...prev,
           {

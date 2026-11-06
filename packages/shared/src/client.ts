@@ -11,6 +11,10 @@ import type {
   ShelvesDetail,
   ShelvesOut,
   StagedFile,
+  GcReport,
+  SyncConfig,
+  SyncReport,
+  SyncStatus,
 } from "./types";
 
 export class ApiError extends Error {
@@ -77,9 +81,10 @@ export const api = {
   updatePackage: (id: number, patch: Partial<PackageMetaInput>) =>
     request<PackageDetail>(`/api/packages/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePackage: (id: number) => request<{ ok: boolean }>(`/api/packages/${id}`, { method: "DELETE" }),
-  stageFile: (file: File) => {
+  stageFile: (file: File, cover?: Blob | null) => {
     const form = new FormData();
     form.append("file", file);
+    if (cover !== null && cover !== undefined) form.append("cover", cover, "cover.png");
     return request<StagedFile>("/api/packages/stage", { method: "POST", body: form });
   },
   /** 主动废弃暂存（放弃入库/移除文件时立即删除，不等 24h TTL）。 */
@@ -130,6 +135,30 @@ export const api = {
   getProgress: (fileId: number) => request<Progress | null>(`/api/progress/${fileId}`),
   putProgress: (fileId: number, locator: Record<string, unknown>, percent: number) =>
     request<Progress>(`/api/progress/${fileId}`, { method: "PUT", body: JSON.stringify({ locator, percent }) }),
+  deleteProgress: (fileId: number) =>
+    request<{ ok: boolean }>(`/api/progress/${fileId}`, { method: "DELETE" }),
+
+  // 客户端渲染的封面（PDF 首页）上传
+  uploadCover: (packageId: number, png: Blob) => {
+    const form = new FormData();
+    form.append("cover", png, "cover.png");
+    return request<{ ok: boolean; real: boolean }>(`/api/packages/${packageId}/cover`, { method: "PUT", body: form });
+  },
+
+  // 同步与备份
+  syncConfig: () => request<{ config: SyncConfig | null }>("/api/sync/config"),
+  putSyncConfig: (config: SyncConfig) =>
+    request<{ ok: boolean; config: SyncConfig }>("/api/sync/config", { method: "PUT", body: JSON.stringify(config) }),
+  testSync: () => request<{ ok: boolean }>("/api/sync/test", { method: "POST" }),
+  syncNow: () => request<{ ok: boolean; report: SyncReport }>("/api/sync/now", { method: "POST" }),
+  syncStatus: () => request<SyncStatus>("/api/sync/status"),
+  gcCloud: (retentionDays?: number) =>
+    request<{ ok: boolean; report: GcReport }>("/api/sync/gc", {
+      method: "POST",
+      body: JSON.stringify({ retention_days: retentionDays }),
+    }),
+  releasePackage: (packageId: number) =>
+    request<{ ok: boolean; releasedFiles: number; freedBytes: number }>(`/api/sync/release/${packageId}`, { method: "POST" }),
 };
 
 export function formatBytes(n: number): string {

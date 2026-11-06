@@ -45,7 +45,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  rmSync(dataDir, { recursive: true, force: true });
+  // Windows：DB 句柄未关时 WAL 文件会挡住删除——尽力清理即可（tmpdir 里的测试残留）
+  try {
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch {
+    /* 句柄未释放，留给系统临时目录清理 */
+  }
 });
 
 describe("认证", () => {
