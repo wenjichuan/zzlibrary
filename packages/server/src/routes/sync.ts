@@ -71,6 +71,11 @@ syncRouter.get("/api/sync/status", (c) => {
   return c.json(c.get("sync").status());
 });
 
+/** 聚焦驱动的云端变更探测（轻版本号校验）：web 窗口聚焦/可见时调用，毫秒级，不抛错（离线静默）。 */
+syncRouter.get("/api/sync/check", async (c) => {
+  return c.json(await c.get("sync").checkCloud());
+});
+
 syncRouter.post("/api/sync/release/:id", (c) => {
   const db = c.get("db");
   const svc = c.get("sync");

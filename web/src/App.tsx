@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
+import CloudSyncWatcher from "./components/CloudSyncWatcher";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import PackagesPage from "./pages/PackagesPage";
@@ -34,6 +35,7 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <CloudSyncWatcher />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Protected><HomePage /></Protected>} />

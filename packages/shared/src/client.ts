@@ -15,6 +15,7 @@ import type {
   GcReport,
   SyncConfig,
   SyncReport,
+  SyncCheckResponse,
   SyncStatus,
 } from "./types";
 
@@ -163,6 +164,7 @@ export const api = {
   testSync: () => request<{ ok: boolean }>("/api/sync/test", { method: "POST" }),
   syncNow: () => request<{ ok: boolean; report: SyncReport }>("/api/sync/now", { method: "POST" }),
   syncStatus: () => request<SyncStatus>("/api/sync/status"),
+  syncCheck: () => request<SyncCheckResponse>("/api/sync/check"),
   gcCloud: (retentionDays?: number) =>
     request<{ ok: boolean; report: GcReport }>("/api/sync/gc", {
       method: "POST",

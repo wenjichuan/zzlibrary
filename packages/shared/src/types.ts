@@ -196,6 +196,19 @@ export interface SyncStatus {
   running: boolean;
 }
 
+/** 聚焦驱动的云端变更探测（轻版本号校验）：仅 1 个 GET（library.json revision 比对），
+ * 有变化才触发真同步——跨设备陈旧性方案（切回窗口必然看到新鲜数据）。 */
+export interface SyncCheckResponse {
+  configured: boolean;
+  /** 同步进行中（本次探测跳过） */
+  running: boolean;
+  /** 云端比本地新且已完成同步（autoSync 关闭或离线时恒 false） */
+  changed: boolean;
+  /** 本次拉取应用的变更条数（含墓碑） */
+  applied: number;
+  revision: number;
+}
+
 /** 同步报告：core 引擎出参的别名（字段漂移在此编译期暴露）。 */
 export type SyncReport = FullSyncReport;
 

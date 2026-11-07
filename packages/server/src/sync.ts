@@ -23,7 +23,7 @@ import {
   type RemoteStore,
 } from "@zzlibrary/core";
 import { createFsStore } from "@zzlibrary/core/node";
-import type { GcReport, SyncConfig, SyncStatus } from "@zzlibrary/shared";
+import type { GcReport, SyncCheckResponse, SyncConfig, SyncStatus } from "@zzlibrary/shared";
 import type { Settings } from "./config";
 import { SqliteSyncDevice } from "./sync-device";
 import { nowSqlite } from "./db";
@@ -184,6 +184,46 @@ export class SyncService {
       this.runSync().catch((err) => console.error("同步重试失败：", err instanceof Error ? err.message : err));
     }, 60000);
     this.retryTimer.unref?.();
+  }
+
+  /** 聚焦驱动的云端变更探测（跨设备陈旧性，用户拍板砍掉定时心跳只留聚焦驱动）：
+   * 仅 1 个 GET（library.json）比对 revision；云端更新才触发真同步。
+   * 不跑 hashPendingFiles/buildManifests——无事发生时毫秒级、零本地计算。
+   * autoSync 关闭 = 用户手动管理同步，探测一并关闭；离线/云异常静默降级（不抛错，聚焦探测不该弹错误）。 */
+  async checkCloud(): Promise<SyncCheckResponse> {
+    const config = this.loadConfig();
+    if (config === null) {
+      return { configured: false, running: false, changed: false, applied: 0, revision: 0 };
+    }
+    const local = await this.revisionOf();
+    if (this.running) {
+      return { configured: true, running: true, changed: false, applied: 0, revision: local };
+    }
+    if (!config.autoSync) {
+      return { configured: true, running: false, changed: false, applied: 0, revision: local };
+    }
+    try {
+      const remote = this.createStore(config);
+      const text = await remote.getText(LIBRARY_INDEX_PATH);
+      if (text === null) {
+        return { configured: true, running: false, changed: false, applied: 0, revision: local };
+      }
+      const lib = JSON.parse(text) as { revision?: number };
+      if ((lib.revision ?? 0) <= local) {
+        return { configured: true, running: false, changed: false, applied: 0, revision: local };
+      }
+      const report = await this.runSync(); // 云端确实更新 → 真同步（含哈希回填/推送）
+      return {
+        configured: true,
+        running: false,
+        changed: true,
+        applied: report.pull.applied + report.pull.tombstones,
+        revision: report.push.revision,
+      };
+    } catch {
+      // 离线/云端异常：本次探测当作未变（60s 重试与下次聚焦会再试）
+      return { configured: true, running: false, changed: false, applied: 0, revision: local };
+    }
   }
 
   status(): SyncStatus {

@@ -193,6 +193,31 @@ describe("同步：fs 云（本地目录）", () => {
     expect(listB.json.items[0].title).toBe("同步包甲·改名");
   });
 
+  it("聚焦探测：他端上云后 B 检出变更并顺带同步；无变更/未配云时静默", async () => {
+    // B 开自动同步（聚焦探测的门）
+    await call(appB, cookieB, "PUT", "/api/sync/config", { provider: "fs", autoSync: true, fs: { root: cloudDir } });
+    // 基线：两端都到最新
+    await call(appA, cookieA, "POST", "/api/sync/now");
+    await call(appB, cookieB, "POST", "/api/sync/now");
+    // A 改备注并上云（B 处于「不知道云变了」的陈旧态）
+    const list = await call(appA, cookieA, "GET", "/api/packages?q=同步包甲");
+    const pid = list.json.items[0].id;
+    await call(appA, cookieA, "PATCH", `/api/packages/${pid}`, { notes: "聚焦探测测试" });
+    await call(appA, cookieA, "POST", "/api/sync/now");
+    // B 聚焦探测 → changed + 顺带完成同步（B 的 API 立即可见新数据）
+    const check = await call(appB, cookieB, "GET", "/api/sync/check");
+    expect(check.status).toBe(200);
+    expect(check.json.changed).toBe(true);
+    expect(check.json.applied).toBeGreaterThanOrEqual(1);
+    const bPkg = await call(appB, cookieB, "GET", `/api/packages/${pid}`);
+    expect(bPkg.json.notes).toBe("聚焦探测测试");
+    // 二次探测：无变更 → 静默
+    const check2 = await call(appB, cookieB, "GET", "/api/sync/check");
+    expect(check2.json.changed).toBe(false);
+    // 还原 B 自动同步（不干扰后续用例的显式同步节奏）
+    await call(appB, cookieB, "PUT", "/api/sync/config", { provider: "fs", autoSync: false, fs: { root: cloudDir } });
+  });
+
   it("B 释放本地空间 → 条目还在 → 再读自动取回", async () => {
     const list = await call(appB, cookieB, "GET", "/api/packages?q=同步包甲");
     const pid = list.json.items[0].id;

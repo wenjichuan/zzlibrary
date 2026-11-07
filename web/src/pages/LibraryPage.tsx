@@ -7,6 +7,7 @@ import { useReaderOverlay } from "../components/ReaderOverlay";
 import PackageDetailBody from "../components/PackageDetailBody";
 import { buildRackVMs, type RackVM } from "../components/shelfVM";
 import { Empty, Spinner } from "../components/ui";
+import { CLOUD_SYNCED_EVENT } from "../components/CloudSyncWatcher";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
 
@@ -46,6 +47,26 @@ export default function LibraryPage() {
   const l2KeyOf = (rackKey: string) => rackKey.split("-")[0]!.slice(1);
   const currentL2Key = selectedRack !== null ? l2KeyOf(selectedRack) : null;
   const currentRack = currentL2Key !== null ? (rackVMs.get(currentL2Key) ?? null) : null;
+
+  // 聚焦探测发现云端更新后的温和刷新：概览+当前架就地换新，
+  // 保持选架/详情/阅读状态不打断（详情下次打开自然是新数据）
+  useEffect(() => {
+    const onCloudSynced = () => {
+      if (!l1Id) return;
+      api.shelvesOverview(Number(l1Id)).then(setData).catch(() => undefined);
+      if (currentL2Key !== null) {
+        api
+          .shelfRack(Number(l1Id), currentL2Key)
+          .then((d) => {
+            const vm = buildRackVMs(d).find((r) => l2KeyOf(r.key) === currentL2Key) ?? null;
+            if (vm !== null) setRackVMs((prev) => new Map(prev).set(currentL2Key, vm));
+          })
+          .catch(() => undefined);
+      }
+    };
+    window.addEventListener(CLOUD_SYNCED_EVENT, onCloudSynced);
+    return () => window.removeEventListener(CLOUD_SYNCED_EVENT, onCloudSynced);
+  }, [l1Id, currentL2Key]);
 
   const handleRackSelect = (key: string) => {
     setSelectedRack(key);
