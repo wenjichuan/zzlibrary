@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CANONICAL_FORMATS } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail, type Package, type PackageDetail, type PackagePage } from "@zzlibrary/shared/client";
 import PackageMetaForm, { metaFromPackage, metaToInput, type MetaFormValue } from "../components/PackageMetaForm";
@@ -6,8 +6,9 @@ import { Button, Empty, Input, Modal, PageHeader, Select, Spinner } from "../com
 import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
 import { prettyDate } from "../components/shelfVM";
-import ReaderOverlay from "../components/ReaderOverlay";
-import FileRow, { FORMAT_ICONS } from "../components/FileRow";
+import { useReaderOverlay } from "../components/ReaderOverlay";
+import PackageDetailBody from "../components/PackageDetailBody";
+import { FORMAT_ICONS } from "../components/FileRow";
 import { renderPdfCover } from "../utils/pdfCover";
 
 /** 格式筛选选项从 core 格式注册表派生（全量规范名），勿手抄清单 */
@@ -75,7 +76,6 @@ export default function PackagesPage() {
   const [qText, setQText] = useState(() => new URLSearchParams(window.location.search).get("q") ?? "");
   const [editing, setEditing] = useState<PackageDetail | null>(null);
   const [detail, setDetail] = useState<PackageDetail | null>(null);
-  const [reading, setReading] = useState<FileDetail | null>(null);
   const { push } = useToast();
   const loadCategories = useCategories((s) => s.load);
   const tree = useCategories((s) => s.tree);
@@ -137,6 +137,8 @@ export default function PackagesPage() {
       /* 刷新失败保持旧态 */
     }
   };
+
+  const { openReader, readerNode } = useReaderOverlay(detail, openDetailById);
 
   const openDetail = async (pkg: Package) => {
     try {
@@ -327,19 +329,11 @@ export default function PackagesPage() {
             setEditing(detail);
             setDetail(null);
           }}
-          onRead={(file) => setReading(file)}
+          onRead={openReader}
           onRefresh={() => void openDetailById(detail.id)}
         />
       )}
-      {reading !== null && detail !== null && (
-        <ReaderOverlay
-          pkgTitle={detail.title}
-          file={reading}
-          initialProgress={reading.progress}
-          onClose={() => setReading(null)}
-          onProgress={() => void openDetailById(detail.id)}
-        />
-      )}
+      {readerNode}
       {editing && (
         <EditModal
           detail={editing}
@@ -375,82 +369,18 @@ function DetailModal({
   onRead: (file: FileDetail) => void;
   onRefresh: () => void;
 }) {
-  const { push } = useToast();
-  const [releasing, setReleasing] = useState(false);
-  const lastRead = useMemo(
-    () =>
-      [...detail.files]
-        .filter((f) => f.progress !== null)
-        .sort((a, b) => (b.progress!.updated_at < a.progress!.updated_at ? -1 : 1))[0] ?? null,
-    [detail.files],
-  );
-  const anyLocal = useMemo(() => detail.files.some((f) => f.local !== false), [detail.files]);
-
-  const release = async () => {
-    setReleasing(true);
-    try {
-      const r = await api.releasePackage(detail.id);
-      push("success", `已释放 ${r.releasedFiles} 个文件（${formatBytes(r.freedBytes)}），阅读时会自动从云端取回`);
-      onRefresh();
-    } catch (err) {
-      push("error", err instanceof Error ? err.message : "释放失败");
-    } finally {
-      setReleasing(false);
-    }
-  };
   return (
     <Modal title="资料包详情" onClose={onClose} wide>
-      <div className="grid grid-cols-[160px_1fr] gap-5">
-        <div>
-          <img src={api.packageCoverUrl(detail.id)} alt="" className="h-52 w-40 rounded-lg object-cover shadow" />
-        </div>
-        <div className="min-w-0 space-y-2 text-sm">
-          <div className="text-base font-semibold text-stone-800">{detail.title}</div>
-          <Info label="作者" value={detail.authors.join("，") || "—"} />
-          <Info
-            label="分类"
-            value={detail.classifications.length > 0 ? detail.classifications.map(formatPath).join(" · ") : "未分类"}
-          />
-          <Info label="发布时间" value={prettyDate(detail.publish_date)} />
-          {detail.publisher && <Info label="发布方" value={detail.publisher} />}
-          <Info
-            label="体量"
-            value={`${detail.file_count} 个文件 · ${formatBytes(detail.total_size)}`}
-          />
-          <Info label="状态" value={detail.status || "—"} />
-          {detail.tags.length > 0 && <Info label="标签" value={detail.tags.join("，")} />}
-          {detail.notes && <Info label="备注" value={detail.notes} />}
-          <div className="pt-2">
-            <Button variant="outline" size="sm" onClick={onEdit}>
-              编辑
-            </Button>
-          </div>
-        </div>
-      </div>
-      <div className="mt-4">
-        {lastRead !== null && (
-          <button
-            className="mb-2 flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
-            onClick={() => onRead(lastRead)}
-          >
-            <span>继续读 · {lastRead.name}</span>
-            <span className="text-xs text-amber-700">上次 {Math.round(lastRead.progress!.percent)}%</span>
-          </button>
-        )}
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-semibold text-stone-700">包内文件（{detail.files.length}）</span>
-          {anyLocal && detail.can_release === true && (
-            <button className="text-xs text-stone-400 hover:text-red-600" disabled={releasing} onClick={() => void release()}>
-              {releasing ? "释放中…" : "释放本地空间"}
-            </button>
-          )}
-        </div>
-        <div className="space-y-2">
-          {detail.files.map((f) => (
-            <FileRow key={f.id} file={f} showProgress onRead={onRead} />
-          ))}
-        </div>
-      </div>
+      <PackageDetailBody
+        detail={detail}
+        onRead={onRead}
+        onRefresh={onRefresh}
+        metaExtra={
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            编辑
+          </Button>
+        }
+      />
     </Modal>
   );
 }
@@ -678,14 +608,5 @@ function EditModal({
         </div>
       </div>
     </Modal>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-2 text-xs">
-      <span className="w-16 shrink-0 text-stone-400">{label}</span>
-      <span className="text-stone-700">{value}</span>
-    </div>
   );
 }

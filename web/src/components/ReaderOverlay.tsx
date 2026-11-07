@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatKind, isReadableFormat } from "@zzlibrary/core";
 import { api } from "@zzlibrary/shared/client";
-import type { FileDetail, Progress } from "@zzlibrary/shared/client";
+import type { FileDetail, PackageDetail, Progress } from "@zzlibrary/shared/client";
 
 const DOC_CSS = `<style>
 body{font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
@@ -629,4 +629,24 @@ function MediaReader({
       )}
     </div>
   );
+}
+
+/** 阅读器装配（两个详情面板共用的唯一接线）：打开状态 + 关闭冲刷/刷新回调一致。
+ * refresh 在进度写回后被调用（如刷新详情、就地补丁列表行）。 */
+export function useReaderOverlay(
+  detail: PackageDetail | null,
+  refresh: (packageId: number) => Promise<unknown>,
+) {
+  const [reading, setReading] = useState<FileDetail | null>(null);
+  const readerNode =
+    reading !== null && detail !== null ? (
+      <ReaderOverlay
+        pkgTitle={detail.title}
+        file={reading}
+        initialProgress={reading.progress}
+        onClose={() => setReading(null)}
+        onProgress={() => void refresh(detail.id)}
+      />
+    ) : null;
+  return { openReader: setReading, readerNode };
 }

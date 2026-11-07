@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, formatBytes, type FileDetail, type PackageDetail, type ShelvesDetail } from "@zzlibrary/shared/client";
+import { api, type FileDetail, type PackageDetail, type ShelvesDetail } from "@zzlibrary/shared/client";
 import { AisleView } from "../components/aisleView";
 import { TimelineView } from "../components/TimelineView";
-import ReaderOverlay from "../components/ReaderOverlay";
-import FileRow from "../components/FileRow";
-import { buildRackVMs, prettyDate } from "../components/shelfVM";
+import { useReaderOverlay } from "../components/ReaderOverlay";
+import PackageDetailBody from "../components/PackageDetailBody";
+import { buildRackVMs } from "../components/shelfVM";
 import { Empty, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
@@ -17,7 +17,6 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [selectedRack, setSelectedRack] = useState<string | null>(null);
   const [detailPkg, setDetailPkg] = useState<PackageDetail | null>(null);
-  const [reading, setReading] = useState<FileDetail | null>(null);
   const tree = useCategories((s) => s.tree);
   const loadCategories = useCategories((s) => s.load);
   const { push } = useToast();
@@ -31,7 +30,6 @@ export default function LibraryPage() {
     setLoading(true);
     setSelectedRack(null);
     setDetailPkg(null);
-    setReading(null);
     api
       .shelvesDetail(Number(l1Id))
       .then(setData)
@@ -50,6 +48,8 @@ export default function LibraryPage() {
       push("error", err instanceof Error ? err.message : "加载失败");
     }
   };
+
+  const { openReader, readerNode } = useReaderOverlay(detailPkg, openPackage);
 
   if (loading && !data) {
     return <Spinner text="正在搭建书架…" />;
@@ -116,18 +116,17 @@ export default function LibraryPage() {
           <AisleView racks={racks} onRackSelect={(key) => setSelectedRack(key)} />
         )}
 
-        {detailPkg && <PackageDrawer pkg={detailPkg} onClose={() => setDetailPkg(null)} onRead={setReading} />}
+        {detailPkg && (
+          <PackageDrawer
+            pkg={detailPkg}
+            onClose={() => setDetailPkg(null)}
+            onRead={openReader}
+            onRefresh={() => void openPackage(detailPkg.id)}
+          />
+        )}
       </div>
 
-      {reading && detailPkg && (
-        <ReaderOverlay
-          pkgTitle={detailPkg.title}
-          file={reading}
-          initialProgress={reading.progress}
-          onClose={() => setReading(null)}
-          onProgress={() => void openPackage(detailPkg.id)}
-        />
-      )}
+      {readerNode}
     </div>
   );
 }
@@ -136,13 +135,13 @@ function PackageDrawer({
   pkg,
   onClose,
   onRead,
+  onRefresh,
 }: {
   pkg: PackageDetail;
   onClose: () => void;
   onRead: (f: FileDetail) => void;
+  onRefresh: () => void;
 }) {
-  const fmt = (p: { l1?: { name: string } | null; l2?: { name: string } | null; l3?: { name: string } | null }) =>
-    [p.l1?.name, p.l2?.name, p.l3?.name].filter(Boolean).join("/");
   return (
     <div className="absolute inset-y-0 right-0 z-30 flex w-96 flex-col overflow-y-auto border-l border-stone-200 bg-white/95 shadow-2xl backdrop-blur">
       <div className="sticky top-0 flex items-center justify-between border-b border-stone-200 bg-white px-4 py-3">
@@ -152,39 +151,11 @@ function PackageDrawer({
         </button>
       </div>
       <div className="space-y-4 p-4">
-        <div className="flex gap-3">
-          <img src={api.packageCoverUrl(pkg.id)} alt="" className="h-40 w-28 rounded-lg object-cover shadow" />
-          <div className="min-w-0 flex-1 space-y-1.5 text-xs">
-            <div className="text-sm font-semibold text-stone-800">{pkg.title}</div>
-            <Info label="作者" value={pkg.authors.join("，") || "—"} />
-            <Info label="分类" value={pkg.classifications.map(fmt).join(" · ") || "未分类"} />
-            <Info label="时间" value={prettyDate(pkg.publish_date)} />
-            <Info label="体量" value={`${pkg.file_count} 文件 · ${formatBytes(pkg.total_size)}`} />
-            <Info label="状态" value={pkg.status} />
-            {pkg.tags.length > 0 && <Info label="标签" value={pkg.tags.join("，")} />}
-          </div>
-        </div>
-        <div>
-          <div className="mb-2 text-xs font-semibold text-stone-600">包内文件</div>
-          <div className="space-y-1.5">
-            {pkg.files.map((f) => (
-              <FileRow key={f.id} file={f} showProgress onRead={onRead} />
-            ))}
-          </div>
-        </div>
+        <PackageDetailBody detail={pkg} onRead={onRead} onRefresh={onRefresh} />
         <Link to="/packages" className="block text-center text-xs text-stone-500 hover:text-amber-700">
           在资料包列表中管理 →
         </Link>
       </div>
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-2">
-      <span className="w-10 shrink-0 text-stone-400">{label}</span>
-      <span className="min-w-0 break-words text-stone-700">{value}</span>
     </div>
   );
 }
