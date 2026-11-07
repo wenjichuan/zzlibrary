@@ -140,25 +140,11 @@ function FloorSegMenu({
 }
 
 /** 书脊悬停预览卡（250ms 延迟触发，由 TimelineView 持有状态）。 */
-function SpinePreviewCard({
-  pkg,
-  x,
-  y,
-  axis,
-}: {
-  pkg: ShelfPackage;
-  x: number;
-  y: number;
-  axis: "publish" | "ingest";
-}) {
+function SpinePreviewCard({ pkg, axis }: { pkg: ShelfPackage; axis: "publish" | "ingest" }) {
   return (
     <div
-      className="pointer-events-none fixed z-50 flex gap-2.5 rounded-lg border border-[#c9b58c] bg-white/95 p-2.5 shadow-xl"
-      style={{
-        width: 228,
-        left: Math.min(x + 16, window.innerWidth - 244),
-        top: Math.min(y + 14, window.innerHeight - 152),
-      }}
+      className="pointer-events-none flex gap-2.5 rounded-lg border border-[#c9b58c] bg-white/95 p-2.5 shadow-xl"
+      style={{ width: 228 }}
     >
       <img
         src={api.packageCoverUrl(pkg.id)}
@@ -288,23 +274,39 @@ export function TimelineView({
   };
 
   // 书脊 hover 预览卡（250ms 延迟，避免扫过时闪烁）
-  const [hoverPkg, setHoverPkg] = useState<{ pkg: ShelfPackage; x: number; y: number } | null>(null);
+  // 位置跟手用 ref 直改 DOM（mousemove 每秒 60+ 次，进 React state 会整视图重渲染）；
+  // 只有「换了哪本书」才 setState。
+  const [hoverPkg, setHoverPkg] = useState<ShelfPackage | null>(null);
   const hoverTimer = useRef<number | null>(null);
-  const hoverHandlers: SpineHoverHandlers = {
-    onEnter: (pkg, e) => {
-      if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-      const x = e.clientX;
-      const y = e.clientY;
-      hoverTimer.current = window.setTimeout(() => setHoverPkg({ pkg, x, y }), 250);
-    },
-    onMove: (pkg, e) => {
-      if (hoverPkg) setHoverPkg({ pkg, x: e.clientX, y: e.clientY });
-    },
-    onLeave: () => {
-      if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-      setHoverPkg(null);
-    },
+  const hoverCardRef = useRef<HTMLDivElement | null>(null);
+  const positionHoverCard = (x: number, y: number) => {
+    const el = hoverCardRef.current;
+    if (el === null) return;
+    el.style.left = `${Math.min(x + 14, window.innerWidth - 240)}px`;
+    el.style.top = `${Math.max(8, y - 16)}px`;
   };
+  const hoverHandlers = useMemo<SpineHoverHandlers>(
+    () => ({
+      onEnter: (pkg, e) => {
+        if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+        const x = e.clientX;
+        const y = e.clientY;
+        hoverTimer.current = window.setTimeout(() => {
+          setHoverPkg(pkg);
+          positionHoverCard(x, y);
+        }, 250);
+      },
+      onMove: (pkg, e) => {
+        positionHoverCard(e.clientX, e.clientY);
+        if (hoverPkg?.id !== pkg.id) setHoverPkg(pkg); // 换书才进 state
+      },
+      onLeave: () => {
+        if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+        setHoverPkg(null);
+      },
+    }),
+    [hoverPkg],
+  );
 
   // 视口状态：纵向窗口化（外层 scrollTop/clientHeight）+ 横向裁剪（内层 scrollLeft/clientWidth）
   const [vp, setVp] = useState({ y: 0, x: 0, w: 1200, h: 1600, floorsTop: 0 });
@@ -697,7 +699,11 @@ export function TimelineView({
       </div>
 
       {/* 书脊悬停预览卡 */}
-      {hoverPkg && <SpinePreviewCard pkg={hoverPkg.pkg} x={hoverPkg.x} y={hoverPkg.y} axis={axis} />}
+      {hoverPkg && (
+        <div ref={hoverCardRef} className="fixed z-50" style={{ left: 0, top: 0 }}>
+          <SpinePreviewCard pkg={hoverPkg} axis={axis} />
+        </div>
+      )}
     </div>
   );
 }
