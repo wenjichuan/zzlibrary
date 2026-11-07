@@ -28,7 +28,7 @@ import {
   sanitizeName,
 } from "@zzlibrary/core";
 import type { DatabaseSync } from "node:sqlite";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, statSync, createReadStream } from "node:fs";
 import { join } from "node:path";
 import type { Settings } from "./config";
 import { isoFromSqlite, newUuid, nowSqlite } from "./db";
@@ -522,6 +522,26 @@ export class SqliteSyncDevice implements LocalDevice {
       if (existsSync(abs)) return new Uint8Array(readFileSync(abs));
     }
     return null;
+  }
+
+  /** 大文件流式读取（multipart 逐段上传的前提；GB 级不整读进内存）。封面走 readBlob 回退。 */
+  async readBlobStream(hash: string): Promise<{ stream: ReadableStream<Uint8Array>; size: number } | null> {
+    const f = this.db
+      .prepare("SELECT file_path FROM files WHERE sha256 = ? AND local = 1 LIMIT 1")
+      .get(hash) as { file_path: string } | undefined;
+    if (f === undefined) return null;
+    const abs = join(this.settings.dataDir, f.file_path);
+    if (!existsSync(abs)) return null;
+    const size = statSync(abs).size;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const rs = createReadStream(abs);
+        rs.on("data", (chunk) => controller.enqueue(new Uint8Array(chunk as Buffer)));
+        rs.on("end", () => controller.close());
+        rs.on("error", (err) => controller.error(err));
+      },
+    });
+    return { stream, size };
   }
 
   // ---------- applyRemote ----------

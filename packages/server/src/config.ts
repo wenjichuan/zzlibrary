@@ -40,6 +40,8 @@ export class Settings {
   readonly port: number;
   /** 流式代理阈值：本地无字节且大于该值且云端支持区间读 → 前缀增长流式伺服；否则整文件取回 */
   readonly smallFetchThreshold: number;
+  /** 单次同步的哈希回填字节预算：防止「5000 个 2GB 视频」把同步绑在一小时哈希上；新文件优先 */
+  readonly hashBudgetBytes: number;
 
   constructor() {
     this.dataDir = env("DATA_DIR") ?? join(REPO_ROOT, "data");
@@ -50,6 +52,7 @@ export class Settings {
     this.corsOrigins = env("CORS_ORIGINS") ?? "";
     this.port = env("PORT") ? Number(env("PORT")) : Number(process.env.PORT ?? 8000);
     this.smallFetchThreshold = env("SMALL_FETCH") ? Number(env("SMALL_FETCH")) : 8 * 1024 * 1024;
+    this.hashBudgetBytes = env("HASH_BUDGET_MB") ? Number(env("HASH_BUDGET_MB")) * 1024 * 1024 : 2 * 1024 * 1024 * 1024;
   }
 
   get dbPath(): string {

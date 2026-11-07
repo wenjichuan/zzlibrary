@@ -1,6 +1,6 @@
 /** 本地目录实现的远端存储（node:fs）：全量本地测试与桌面端单机模拟用。
  * 目录结构即云端结构（library.json / db/ / blobs/）。 */
-import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync, unlinkSync, openSync, readSync, closeSync, createWriteStream } from "node:fs";
 import { dirname, join } from "node:path";
 import { SyncTransportError, type RemoteStore } from "./store";
 
@@ -62,6 +62,31 @@ export function createFsStore(rootDir: string): RemoteStore {
         writeFileSync(abs(path), bytes);
       } catch (err) {
         throw new SyncTransportError(`写入失败：${err instanceof Error ? err.message : err}`, path);
+      }
+    },
+    async putStream(path, source) {
+      ensureParent(path);
+      const ws = createWriteStream(abs(path));
+      const reader = source.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!ws.write(value)) {
+            await new Promise<void>((resolve, reject) => {
+              ws.once("drain", resolve);
+              ws.once("error", reject);
+            });
+          }
+        }
+        await new Promise<void>((resolve, reject) => {
+          ws.once("error", reject);
+          ws.end(resolve);
+        });
+      } catch (err) {
+        ws.destroy();
+        await reader.cancel().catch(() => undefined);
+        throw new SyncTransportError(`流式写入失败：${err instanceof Error ? err.message : err}`, path);
       }
     },
     async head(path) {

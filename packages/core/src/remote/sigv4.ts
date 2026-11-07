@@ -1,5 +1,6 @@
 /** AWS Signature Version 4 手写签名（WebCrypto，平台无关、零依赖）。
- * 覆盖 S3 所需子集：无查询串、路径风格寻址、请求体整体哈希。 */
+ * 覆盖 S3 所需子集：路径风格寻址、请求体整体哈希、可选查询串（multipart 的
+ * ?uploads / ?partNumber=N&uploadId=X 等）。 */
 
 const encoder = new TextEncoder();
 
@@ -27,7 +28,7 @@ async function hmac(key: Uint8Array, message: string): Promise<Uint8Array> {
 
 export interface SigV4Input {
   method: string;
-  /** 完整 URL（无查询串） */
+  /** 完整 URL（无查询串；查询经 query 参数单独传入并参与签名） */
   url: string;
   region: string;
   service: string;
@@ -37,6 +38,8 @@ export interface SigV4Input {
   body?: Uint8Array;
   /** 参与签名的额外头（如 range——S3 要求请求头与签名一致；键会被小写化后按序并入） */
   extraHeaders?: Record<string, string>;
+  /** 查询参数（multipart 等）：与实际请求 URL 用同一套编码，避免签名/请求不一致 */
+  query?: Record<string, string>;
 }
 
 export interface SigV4Headers {
@@ -46,6 +49,20 @@ export interface SigV4Headers {
 }
 
 const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/** AWS 规范 URI 编码：encodeURIComponent 之外再补 ! ' ( ) *（RFC3986 保留字符）。 */
+export function awsUriEncode(s: string): string {
+  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/** 规范查询串：键值各自编码 → 按编码后键值排序 → k=v 用 & 连接（空值保留 =）。 */
+export function canonicalQueryString(query: Record<string, string>): string {
+  return Object.entries(query)
+    .map(([k, v]) => [awsUriEncode(k), awsUriEncode(v)] as const)
+    .sort(([ka, va], [kb, vb]) => (ka === kb ? (va < vb ? -1 : va > vb ? 1 : 0) : ka < kb ? -1 : 1))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
+}
 
 export async function signAwsV4(input: SigV4Input): Promise<SigV4Headers> {
   const url = new URL(input.url);
@@ -76,7 +93,7 @@ export async function signAwsV4(input: SigV4Input): Promise<SigV4Headers> {
   const canonicalRequest = [
     input.method.toUpperCase(),
     canonicalUri,
-    "", // 无查询串
+    input.query !== undefined ? canonicalQueryString(input.query) : "",
     canonicalHeaders,
     signedHeaders,
     payloadHash,

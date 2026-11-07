@@ -1,8 +1,10 @@
 /** WebDAV 客户端（纯 fetch）：坚果云/NAS/Nextcloud 等通用。
  * 只依赖 PUT/GET/HEAD/DELETE/MKCOL 五个基础动词——不需要 PROPFIND 列目录
  * （两级索引设计让云端永远无需列目录，兼容性最大化）。
- * PUT 前自动逐级 MKCOL 建目录（已存在返回 405，忽略）。 */
+ * PUT 前自动逐级 MKCOL 建目录（已存在返回 405，忽略）。
+ * 传输走 fetchWithRetry：消费级 WebDAV 的 429/503 限流按指数退避自动重试。 */
 import { SyncTransportError, type RemoteStore } from "./store";
+import { fetchWithRetry } from "./retry";
 
 export interface WebDavOptions {
   /** 服务根，如 https://dav.jianguoyun.com/dav/ */
@@ -32,7 +34,7 @@ export function createWebDavStore(opts: WebDavOptions): RemoteStore {
     const headers = new Headers(init.headers);
     if (auth) headers.set("authorization", auth);
     try {
-      return await fetch(url(path), { ...init, headers });
+      return await fetchWithRetry(url(path), { ...init, headers });
     } catch (err) {
       throw new SyncTransportError(
         `网络错误：${err instanceof Error ? err.message : err}`,

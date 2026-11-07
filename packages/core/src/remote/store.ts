@@ -16,6 +16,8 @@ export interface RemoteStore {
   /** 按字节区间读取（闭区间 [start, end]；流式代理/前缀取回用）；null = 该远端不支持区间读，调用方回退整取 */
   getBytesRange?(path: string, start: number, end: number): Promise<Uint8Array | null>;
   putBytes(path: string, bytes: Uint8Array): Promise<void>;
+  /** 流式写入（大 blob 逐段上传不整读进内存；S3 实现=multipart）。实现方保证消费或取消流。 */
+  putStream?(path: string, source: ReadableStream<Uint8Array>): Promise<void>;
   head(path: string): Promise<boolean>;
   remove?(path: string): Promise<void>;
 }

@@ -60,6 +60,8 @@ export interface LocalDevice {
   flushPendingWrites?(): Promise<void> | void;
   /** 读内容块字节（按哈希找本地文件/封面）；无则 null */
   readBlob(sha256: string): Promise<Uint8Array | null>;
+  /** 内容块流式读取（大文件不整读进内存；size 供上传报告）。null=无/不支持 → 回退 readBlob */
+  readBlobStream?(sha256: string): Promise<{ stream: ReadableStream<Uint8Array>; size: number } | null>;
   /** 应用一份远端清单（合并判断可复用 merge.ts） */
   applyRemote(env: ManifestEnvelope): Promise<ApplyOutcome>;
   /** 应用批次的事务边界（apply 全部结束后 commit=true 提交） */
@@ -427,6 +429,23 @@ export async function push(
     if (head) {
       device.addBlobCache(h);
       return;
+    }
+    // 流式优先：大 blob 逐段上传不整读进内存（S3=multipart，fs=写流）
+    if (remote.putStream !== undefined && device.readBlobStream !== undefined) {
+      const s = await device.readBlobStream(h);
+      if (s !== null) {
+        try {
+          await remote.putStream(blobPath(h), s.stream);
+        } catch (err) {
+          report.errors.push(`流式上传失败：${h.slice(0, 8)}…：${err instanceof Error ? err.message : String(err)}`);
+          blobFailed.add(h);
+          return;
+        }
+        device.addBlobCache(h);
+        report.uploadedBlobs += 1;
+        report.uploadedBlobBytes += s.size;
+        return;
+      }
     }
     const bytes = await device.readBlob(h);
     if (bytes === null) {

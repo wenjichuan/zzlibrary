@@ -96,18 +96,23 @@ export class SyncService {
     });
   }
 
-  /** 存量文件哈希回填（files.sha256 为空的本地文件；首次全量、其后增量）。流式哈希不整读大文件。 */
-  async hashPendingFiles(limit = 5000): Promise<number> {
+  /** 存量文件哈希回填（files.sha256 为空的本地文件；首次全量、其后增量）。流式哈希不整读大文件。
+   * 新文件优先（id 降序——刚入库的先受保护）；字节预算封顶（5000 个 2GB 视频不会绑架同步）。 */
+  async hashPendingFiles(limit = 5000, budgetBytes = this.settings.hashBudgetBytes): Promise<number> {
     const rows = this.db
-      .prepare("SELECT id, file_path FROM files WHERE sha256 IS NULL AND local = 1 LIMIT ?")
+      .prepare("SELECT id, file_path FROM files WHERE sha256 IS NULL AND local = 1 ORDER BY id DESC LIMIT ?")
       .all(limit) as Array<{ id: number; file_path: string }>;
     let hashed = 0;
+    let bytes = 0;
     const upd = this.db.prepare("UPDATE files SET sha256 = ? WHERE id = ?");
     for (const r of rows) {
       const abs = join(this.settings.dataDir, r.file_path);
       if (!existsSync(abs)) continue; // 缺失文件下次再试
+      const size = statSync(abs).size;
+      if (hashed > 0 && bytes + size > budgetBytes) break; // 预算尽（首个文件总允许）
       upd.run(await sha256File(abs), r.id);
       hashed += 1;
+      bytes += size;
     }
     return hashed;
   }

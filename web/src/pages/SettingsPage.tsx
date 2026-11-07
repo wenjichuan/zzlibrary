@@ -13,6 +13,16 @@ const PROVIDERS: Array<{ value: SyncConfig["provider"]; label: string; hint: str
   { value: "s3", label: "S3 兼容", hint: "AWS S3 / Cloudflare R2 / MinIO 等" },
 ];
 
+/** S3 服务商预设：选完自动填 Region 与 Endpoint 示例（普通用户不用懂这些字段是什么）。 */
+const S3_PRESETS = [
+  { value: "r2", label: "Cloudflare R2", region: "auto", example: "https://<账户ID>.r2.cloudflarestorage.com" },
+  { value: "b2", label: "Backblaze B2", region: "us-west-004", example: "https://s3.<区域>.backblazeb2.com" },
+  { value: "oss", label: "阿里云 OSS", region: "oss-cn-hangzhou", example: "https://oss-cn-hangzhou.aliyuncs.com" },
+  { value: "cos", label: "腾讯云 COS", region: "ap-guangzhou", example: "https://cos.ap-guangzhou.myqcloud.com" },
+  { value: "minio", label: "MinIO / 自建", region: "us-east-1", example: "http://<主机>:9000" },
+  { value: "", label: "自定义（其他 S3 兼容）", region: "us-east-1", example: "https://…" },
+] as const;
+
 export default function SettingsPage() {
   const { push } = useToast();
   const [config, setConfig] = useState<SyncConfig | null>(null);
@@ -23,6 +33,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [backfill, setBackfill] = useState<{ running: boolean; done: number; total: number }>({ running: false, done: 0, total: 0 });
   const [gcing, setGcing] = useState(false);
+  const [s3Preset, setS3Preset] = useState<string>("");
 
   /** 整理云端：过期墓碑 + 无引用内容块（删除时已记账，按账清理，无全量扫描）。 */
   const gcCloud = async () => {
@@ -233,10 +244,27 @@ export default function SettingsPage() {
           {config.provider === "s3" && config.s3 !== undefined && (
             <div className="space-y-2">
               <label className="block space-y-1">
-                <span className="text-xs text-stone-500">Endpoint（R2：https://&lt;账户&gt;.r2.cloudflarestorage.com）</span>
+                <span className="text-xs text-stone-500">服务商（自动填 Region 与 Endpoint 示例）</span>
+                <select
+                  value={s3Preset}
+                  onChange={(e) => {
+                    const p = S3_PRESETS.find((x) => x.value === e.target.value) ?? S3_PRESETS[S3_PRESETS.length - 1];
+                    setS3Preset(e.target.value);
+                    setConfig({ ...config, s3: { ...config.s3!, region: p.region } });
+                  }}
+                  className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 focus:border-amber-600 focus:outline-none"
+                >
+                  {S3_PRESETS.map((p) => (
+                    <option key={p.label} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-stone-500">Endpoint（服务地址）</span>
                 <Input
                   value={config.s3.endpoint}
                   onChange={(e) => setConfig({ ...config, s3: { ...config.s3!, endpoint: e.target.value } })}
+                  placeholder={S3_PRESETS.find((x) => x.value === s3Preset)?.example ?? "https://…"}
                 />
               </label>
               <div className="grid grid-cols-2 gap-2">
