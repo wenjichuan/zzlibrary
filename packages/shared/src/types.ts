@@ -162,6 +162,15 @@ export interface ShelvesOut {
   total: number;
 }
 
+/** 馆藏统计（GET /api/stats，首页四卡） */
+export interface Stats {
+  packages: number;
+  files: number;
+  l1: number;
+  l2: number;
+  l3: number;
+}
+
 export interface ShelfPlacement {
   segment_key: string;
   package: ShelfPackage;

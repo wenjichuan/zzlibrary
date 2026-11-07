@@ -18,6 +18,19 @@ import type { FileRow, PackageRow } from "../repo";
 
 export const shelvesRouter = new Hono<Env>();
 
+/** 馆藏统计（首页四卡）：纯 COUNT 轻端点——替代「拉 100 包列表算文件数」（超 100 包即错）的旧做法。 */
+shelvesRouter.get("/api/stats", (c) => {
+  const db = c.get("db");
+  const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+  return c.json({
+    packages: n("SELECT COUNT(*) AS n FROM packages"),
+    files: n("SELECT COUNT(*) AS n FROM files"),
+    l1: n("SELECT COUNT(*) AS n FROM categories WHERE level = 1"),
+    l2: n("SELECT COUNT(*) AS n FROM categories WHERE level = 2"),
+    l3: n("SELECT COUNT(*) AS n FROM categories WHERE level = 3"),
+  });
+});
+
 function l1Or404(db: Env["Variables"]["db"], l1Id: number): CategoryRow {
   const c = getCategory(db, l1Id);
   if (c === null || c.level !== 1) throw new HTTPException(404, { message: "一级分类不存在" });

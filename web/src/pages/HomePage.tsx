@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type PackagePage, type ShelvesOut } from "@zzlibrary/shared";
+import { api, type ShelvesOut, type Stats } from "@zzlibrary/shared";
 import { Button, PageHeader, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 
 export default function HomePage() {
-  const [pkgs, setPkgs] = useState<PackagePage | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [shelvesByL1, setShelvesByL1] = useState<Record<string, ShelvesOut>>({});
   const tree = useCategories((s) => s.tree);
   const load = useCategories((s) => s.load);
@@ -14,26 +14,27 @@ export default function HomePage() {
     load();
   }, [load]);
 
+  // 轻统计端点（COUNT×5），不再拉 100 包列表——旧做法文件总数超过 100 包就是错的
   useEffect(() => {
-    void api.listPackages({ page: 1, page_size: 100 }).then(setPkgs);
+    void api.stats().then(setStats).catch(() => undefined);
   }, []);
 
+  // 概览卡并行拉取（串行瀑布在分类多时会把首页拖成 N×RTT）
   useEffect(() => {
-    void (async () => {
-      const result: Record<string, ShelvesOut> = {};
-      for (const node of tree) {
-        try {
-          result[node.id] = await api.shelves(node.id);
-        } catch {
-          /* ignore */
-        }
-      }
-      setShelvesByL1(result);
-    })();
+    void Promise.all(
+      tree.map((node) =>
+        api
+          .shelves(node.id)
+          .then((r) => [node.id, r] as const)
+          .catch(() => null),
+      ),
+    ).then((rows) => {
+      setShelvesByL1(Object.fromEntries(rows.filter((r): r is [number, ShelvesOut] => r !== null)));
+    });
   }, [tree]);
 
-  const totalPackages = pkgs?.total ?? 0;
-  const totalFiles = pkgs?.items.reduce((acc, p) => acc + p.file_count, 0) ?? 0;
+  const totalPackages = stats?.packages ?? "…";
+  const totalFiles = stats?.files ?? "…";
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
@@ -58,7 +59,7 @@ export default function HomePage() {
       </div>
 
       {tree.length === 0 ? (
-        pkgs === null ? (
+        stats === null ? (
           <Spinner />
         ) : (
           <div className="rounded-xl border border-stone-200 bg-white p-8 text-center">

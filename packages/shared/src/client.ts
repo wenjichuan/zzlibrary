@@ -10,6 +10,7 @@ import type {
   SegmentConfigBundle,
   ShelvesDetail,
   ShelvesOut,
+  Stats,
   StagedFile,
   GcReport,
   SyncConfig,
@@ -113,6 +114,7 @@ export const api = {
 
   // shelves
   shelves: (l1: number) => request<ShelvesOut>(`/api/shelves${qs({ l1 })}`),
+  stats: () => request<Stats>("/api/stats"),
   shelvesDetail: (l1: number) =>
     request<ShelvesDetail>(`/api/shelves${qs({ l1, with_packages: "1" })}`),
 
