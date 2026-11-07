@@ -22,40 +22,21 @@ function metaText(file: FileDetail, showProgress?: boolean): string {
 }
 
 /**
- * 文件行的唯一交互契约：可读格式点击即读（onRead 打开内置阅读器，字节不在本地时由服务端静默取回），
- * 不可读格式「阅览」置灰、「另存」存副本（download 强制保存语义，浏览器不再自作主张渲染或下载）。
- * 所有展示文件列表的页面共用，勿在页面内重写。
- * compact=紧凑行（书架页详情卡）：整行即点击区（不可读格式整行即另存）；默认=完整行（资料包页）：封面缩略图 + 「阅览/另存」按钮。
+ * 文件行的唯一交互契约（全应用单一形态，勿在页面内重写）：可读格式行点击或「阅览」进内置阅读器
+ * （字节不在本地时由服务端静默取回）；不可读格式「阅览」置灰（悬停说明）、「另存」带 download
+ * 强制保存语义（浏览器不自作主张渲染或导航）。
  */
 export default function FileRow({
   file,
   onRead,
   showProgress,
-  compact,
 }: {
   file: FileDetail;
   onRead?: (f: FileDetail) => void;
   showProgress?: boolean;
-  compact?: boolean;
 }) {
   const readable = readableFormat(file.format);
   const meta = metaText(file, showProgress);
-
-  if (compact) {
-    const cls =
-      "flex w-full items-center justify-between gap-2 rounded-lg border border-stone-100 px-3 py-2 text-left text-xs text-stone-700 hover:border-amber-500 hover:bg-amber-50";
-    return readable ? (
-      <button type="button" className={cls} onClick={() => onRead?.(file)}>
-        <span className="truncate">{file.name}</span>
-        <span className="ml-2 shrink-0 text-stone-400">{meta}</span>
-      </button>
-    ) : (
-      <a className={cls} href={api.fileUrl(file.id)} download={file.name}>
-        <span className="truncate">{file.name}</span>
-        <span className="ml-2 shrink-0 text-stone-400">{meta}</span>
-      </a>
-    );
-  }
 
   return (
     <div

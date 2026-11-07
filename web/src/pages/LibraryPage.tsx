@@ -168,7 +168,7 @@ function PackageDrawer({
           <div className="mb-2 text-xs font-semibold text-stone-600">包内文件</div>
           <div className="space-y-1.5">
             {pkg.files.map((f) => (
-              <FileRow key={f.id} file={f} compact showProgress onRead={onRead} />
+              <FileRow key={f.id} file={f} showProgress onRead={onRead} />
             ))}
           </div>
         </div>
