@@ -312,7 +312,10 @@ export default function PackagesPage() {
           pkgTitle={detail.title}
           file={reading}
           initialProgress={reading.progress}
-          onClose={() => setReading(null)}
+          onClose={() => {
+            setReading(null);
+            void load(); // 阅读结束刷新列表——状态列随进度重算更新，无需重进页面
+          }}
           onProgress={() => void openDetailById(detail.id)}
         />
       )}

@@ -49,8 +49,23 @@ export default function ReaderOverlay({ pkgTitle, file, initialProgress, onClose
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       const p = pendingRef.current;
-      if (p !== null) void api.putProgress(file.id, p.locator, p.percent).catch(() => undefined);
+      if (p !== null) {
+        pendingRef.current = null;
+        void api.putProgress(file.id, p.locator, p.percent).catch(() => undefined);
+      }
     }, 3000);
+  }, [file.id]);
+  /** 立即冲刷挂起的进度并等写回完成——显式关闭（返回/Esc）走这里，保证 onClose 后（父级刷新列表）看到的已是重算后的状态 */
+  const flushNow = useCallback(async () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const p = pendingRef.current;
+    if (p !== null) {
+      pendingRef.current = null;
+      await api.putProgress(file.id, p.locator, p.percent).catch(() => undefined);
+    }
   }, [file.id]);
   useEffect(() => {
     const flush = () => {
@@ -60,6 +75,7 @@ export default function ReaderOverlay({ pkgTitle, file, initialProgress, onClose
       }
       const p = pendingRef.current;
       if (p !== null) {
+        pendingRef.current = null;
         void fetch(`/api/progress/${file.id}`, {
           method: "PUT",
           credentials: "include",
@@ -85,19 +101,24 @@ export default function ReaderOverlay({ pkgTitle, file, initialProgress, onClose
     onProgress(0);
   };
 
+  // 关闭 = 先冲刷进度写回，再回调（父级在 onClose 里刷新列表，必须看到重算后的状态）
+  const requestClose = useCallback(async () => {
+    await flushNow();
+    onClose();
+  }, [flushNow, onClose]);
   // Esc 关闭
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") void requestClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [requestClose]);
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-stone-100">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-4">
-        <button className="rounded-lg px-2 py-1 text-stone-500 hover:bg-stone-100 hover:text-stone-800" onClick={onClose} title="返回（Esc）">
+        <button className="rounded-lg px-2 py-1 text-stone-500 hover:bg-stone-100 hover:text-stone-800" onClick={() => void requestClose()} title="返回（Esc）">
           ← 返回
         </button>
         <div className="min-w-0 flex-1">
