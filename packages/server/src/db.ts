@@ -23,11 +23,6 @@ export function nowSqlite(): string {
   );
 }
 
-/** Date → 同上格式（毫秒截断到微秒位补零）。 */
-export function toSqliteText(d: Date): string {
-  return d.toISOString().slice(0, 19).replace("T", " ") + ".000000";
-}
-
 /** 库内 DATETIME 文本 → ISO 文本（T 分隔；等价 Python datetime.isoformat()）。 */
 export function isoFromSqlite(text: string): string {
   return text.replace(" ", "T");

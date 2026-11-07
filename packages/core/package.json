@@ -8,5 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
   }
 }

@@ -10,10 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "^1.14.0",
     "@zzlibrary/core": "*",
     "@zzlibrary/shared": "*",
-    "@hono/node-server": "^1.14.0",
+    "fflate": "^0.8.3",
     "hono": "^4.7.0",
+    "jschardet": "^4.1.0",
     "sharp": "^0.34.2"
   },
   "devDependencies": {

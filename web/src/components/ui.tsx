@@ -6,7 +6,7 @@ export function Button({
   className = "",
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "ghost" | "danger" | "outline";
+  variant?: "primary" | "ghost" | "outline";
   size?: "sm" | "md";
 }) {
   const base =
@@ -16,7 +16,6 @@ export function Button({
     primary: "bg-amber-700 text-white hover:bg-amber-800",
     outline: "border border-stone-300 bg-white text-stone-700 hover:border-amber-600 hover:text-amber-800",
     ghost: "text-stone-600 hover:bg-stone-100",
-    danger: "bg-red-700 text-white hover:bg-red-800",
   }[variant];
   return <button className={`${base} ${sizes} ${variants} ${className}`} {...props} />;
 }
