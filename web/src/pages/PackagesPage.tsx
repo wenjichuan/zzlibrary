@@ -111,7 +111,12 @@ export default function PackagesPage() {
 
   const openDetailById = async (id: number) => {
     try {
-      setDetail(await api.getPackage(id));
+      const fresh = await api.getPackage(id);
+      setDetail(fresh);
+      // 就地补丁列表中该包的状态——关闭阅读器时详情刷新（requestClose 已保证进度先写回）顺带更新列表行，单请求不整表重拉
+      setData((prev) =>
+        prev ? { ...prev, items: prev.items.map((p) => (p.id === id ? { ...p, status: fresh.status } : p)) } : prev,
+      );
     } catch {
       /* 刷新失败保持旧态 */
     }
@@ -312,10 +317,7 @@ export default function PackagesPage() {
           pkgTitle={detail.title}
           file={reading}
           initialProgress={reading.progress}
-          onClose={() => {
-            setReading(null);
-            void load(); // 阅读结束刷新列表——状态列随进度重算更新，无需重进页面
-          }}
+          onClose={() => setReading(null)}
           onProgress={() => void openDetailById(detail.id)}
         />
       )}
