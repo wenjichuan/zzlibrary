@@ -119,22 +119,27 @@ export async function pull(device: LocalDevice, remote: RemoteStore): Promise<Pu
         continue;
       }
     }
+    // 有界并发拉取变更清单（顺序无关——envs 之后统一排序）
+    const toFetch: Array<{ path: string }> = [];
     for (const [path, sha] of Object.entries(index)) {
       if (cachedPaths.get(path) === sha) continue; // 已知且未变
-      const text = await remote.getText(path);
+      toFetch.push({ path });
+    }
+    await pooled(toFetch, 6, async (t) => {
+      const text = await remote.getText(t.path);
       if (text === null) {
-        report.errors.push(`清单缺失：${path}`);
-        failedPaths.add(path);
-        continue;
+        report.errors.push(`清单缺失：${t.path}`);
+        failedPaths.add(t.path);
+        return;
       }
       try {
         envs.push(JSON.parse(text) as ManifestEnvelope);
         report.fetched += 1;
       } catch {
-        report.errors.push(`清单解析失败：${path}`);
-        failedPaths.add(path);
+        report.errors.push(`清单解析失败：${t.path}`);
+        failedPaths.add(t.path);
       }
-    }
+    });
     // 该集合在本设备视角的云端终态
     for (const key of newPaths.keys()) {
       if (key.startsWith(`db/${kind}/`) && !(key in index)) newPaths.delete(key);
@@ -198,6 +203,19 @@ export interface SyncOptions {
   now?: () => string;
 }
 
+/** 有界并发执行（大馆藏首拉/大批量变更不再逐条串行 RTT）；fn 自行 try/catch，抛错立即冒泡。 */
+async function pooled<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, Math.max(items.length, 1)) }, async () => {
+    while (i < items.length) {
+      const item = items[i]!;
+      i += 1;
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
 export async function push(
   device: LocalDevice,
   remote: RemoteStore,
@@ -259,15 +277,20 @@ export async function push(
   // 云端有而本地无 → 墓碑（删除传播；条目留在索引里防复活）。
   // 兜底网：设备正常情况下由 buildManifests 携带墓碑（含原 updatedAt，幂等）；
   // 走到这里说明设备丢失了墓碑记忆——先查云端是否已是墓碑，是则认领缓存即可，避免每次同步重造。
+  const missingPaths: string[] = [];
   for (const path of cachedPaths.keys()) {
     if (local.has(path)) continue;
+    if (parseManifestPath(path) === null) continue;
+    missingPaths.push(path);
+  }
+  await pooled(missingPaths, 6, async (path) => {
     const parsed = parseManifestPath(path);
-    if (!parsed) continue;
+    if (parsed === null) return;
     const remoteText = await remote.getText(path);
     if (remoteText !== null) {
       try {
         const existing = JSON.parse(remoteText) as ManifestEnvelope;
-        if (existing.deleted) continue; // 云端已是墓碑，无需重造
+        if (existing.deleted) return; // 云端已是墓碑，无需重造
       } catch {
         /* 解析失败按缺失处理 */
       }
@@ -275,43 +298,48 @@ export async function push(
     const env = envelope(parsed.kind, parsed.uuid, now(), {}, true);
     const text = manifestText(env);
     uploads.set(path, { path, env, text, sha: await sha256Hex(text), blobs: [], tombstone: true });
-  }
+  });
 
   if (uploads.size === 0) {
     report.revision = await device.getRevision();
     return report;
   }
 
-  // 1) 内容块先行（内容寻址，重复上传无害；已上云的跳过）
+  // 1) 内容块先行（内容寻址，重复上传无害；已上云的跳过）——去重后有界并发
   const blobCache = await device.getBlobCache();
   const blobFailed = new Set<string>();
+  const blobTasks: string[] = [];
   for (const up of uploads.values()) {
     for (const h of up.blobs) {
       if (!h || blobFailed.has(h) || blobCache.has(h)) continue;
-      if (await remote.head(blobPath(h))) {
-        await device.addBlobCache(h);
-        continue;
-      }
-      const bytes = await device.readBlob(h);
-      if (bytes === null) {
-        blobFailed.add(h);
-        continue;
-      }
-      await remote.putBytes(blobPath(h), bytes);
-      await device.addBlobCache(h);
-      report.uploadedBlobs += 1;
-      report.uploadedBlobBytes += bytes.length;
+      blobTasks.push(h);
     }
   }
+  await pooled([...new Set(blobTasks)], 4, async (h) => {
+    if (blobFailed.has(h) || blobCache.has(h)) return;
+    if (await remote.head(blobPath(h))) {
+      await device.addBlobCache(h);
+      return;
+    }
+    const bytes = await device.readBlob(h);
+    if (bytes === null) {
+      blobFailed.add(h);
+      return;
+    }
+    await remote.putBytes(blobPath(h), bytes);
+    await device.addBlobCache(h);
+    report.uploadedBlobs += 1;
+    report.uploadedBlobBytes += bytes.length;
+  });
 
-  // 2) 上传清单（内容块缺失的跳过，防指向不存在的块）
+  // 2) 上传清单（内容块缺失的跳过，防指向不存在的块）——有界并发
   const touched = new Set<Collection>();
   const uploaded = new Map<string, Upload>();
-  for (const up of uploads.values()) {
+  await pooled([...uploads.values()], 6, async (up) => {
     if (up.blobs.some((h) => blobFailed.has(h))) {
       report.skippedNoBlob += 1;
       report.errors.push(`本地内容块缺失，跳过清单：${up.path}`);
-      continue;
+      return;
     }
     await remote.putText(up.path, up.text);
     device.noteBaseline?.(up.path, up.env);
@@ -320,7 +348,7 @@ export async function push(
     if (up.tombstone) report.tombstoned += 1;
     const parsed = parseManifestPath(up.path);
     if (parsed) touched.add(parsed.kind);
-  }
+  });
 
   // 3) 受影响集合的索引 = 云端现行索引 ∪ 本次成功上传（条目只增 → 并集安全）
   const cloudText = await remote.getText(LIBRARY_INDEX_PATH);
