@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, formatBytes, type FileDetail, type PackageDetail, type ShelvesDetail } from "@zzlibrary/shared";
 import { AisleView } from "../components/aisleView";
 import { TimelineView } from "../components/TimelineView";
-import ReaderOverlay, { readableFormat } from "../components/ReaderOverlay";
+import ReaderOverlay from "../components/ReaderOverlay";
+import FileRow from "../components/FileRow";
 import { buildRackVMs, prettyDate } from "../components/shelfVM";
 import { Empty, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
@@ -166,32 +167,9 @@ function PackageDrawer({
         <div>
           <div className="mb-2 text-xs font-semibold text-stone-600">包内文件</div>
           <div className="space-y-1.5">
-            {pkg.files.map((f) =>
-              readableFormat(f.format) ? (
-                <button
-                  key={f.id}
-                  onClick={() => onRead(f)}
-                  className="flex w-full items-center justify-between rounded-lg border border-stone-100 px-3 py-2 text-left text-xs text-stone-700 hover:border-amber-500 hover:bg-amber-50"
-                >
-                  <span className="truncate">{f.name}</span>
-                  <span className="ml-2 shrink-0 text-stone-400">
-                    {String(f.format).toUpperCase()}
-                    {f.progress ? ` · 已看 ${Math.round(f.progress.percent)}%` : ""}
-                  </span>
-                </button>
-              ) : (
-                <a
-                  key={f.id}
-                  href={api.fileUrl(f.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-between rounded-lg border border-stone-100 px-3 py-2 text-xs text-stone-700 hover:border-amber-500 hover:bg-amber-50"
-                >
-                  <span className="truncate">{f.name}</span>
-                  <span className="ml-2 shrink-0 text-stone-400">{String(f.format).toUpperCase()}</span>
-                </a>
-              ),
-            )}
+            {pkg.files.map((f) => (
+              <FileRow key={f.id} file={f} compact showProgress onRead={onRead} />
+            ))}
           </div>
         </div>
         <Link to="/packages" className="block text-center text-xs text-stone-500 hover:text-amber-700">

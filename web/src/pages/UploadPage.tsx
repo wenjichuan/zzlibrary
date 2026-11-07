@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatBytes, type StagedFile } from "@zzlibrary/shared";
+import { FORMAT_ICONS } from "../components/FileRow";
 import PackageMetaForm, { emptyMeta, metaToInput, type MetaFormValue } from "../components/PackageMetaForm";
 import { Button, Input, PageHeader } from "../components/ui";
 import { useCategories } from "../stores/categories";
@@ -13,14 +14,6 @@ interface StagedItem {
   staged: StagedFile | null;
   error: string | null;
 }
-
-const FORMAT_ICONS: Record<string, string> = {
-  epub: "📕", pdf: "📄", txt: "📝", md: "📝", html: "🌐",
-  docx: "📘", pptx: "📊", xlsx: "📊",
-  mp4: "🎬", webm: "🎬", mov: "🎬", m4v: "🎬", mkv: "🎬",
-  mp3: "🎵", m4a: "🎵", wav: "🎵", ogg: "🎵", flac: "🎵",
-  jpg: "🖼", png: "🖼", gif: "🖼", webp: "🖼",
-};
 
 /**
  * 入库向导（一次入库一个包）：上传的**所有文件都属于同一个资料包**。
