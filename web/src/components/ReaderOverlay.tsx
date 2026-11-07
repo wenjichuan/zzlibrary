@@ -486,8 +486,10 @@ function DocReader({
   onProgress: (locator: Record<string, unknown>, percent: number) => void;
   setError: (e: string) => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
+  const reportedRef = useRef(-1);
 
   useEffect(() => {
     let dead = false;
@@ -508,25 +510,31 @@ function DocReader({
         }
         if (dead) return;
         const iframe = document.createElement("iframe");
-        iframe.setAttribute("sandbox", ""); // 空值=全限制（脚本/同源/弹窗全禁）
-        iframe.style.cssText = "width:100%;height:100%;border:0;background:#fafaf9";
+        // allow-same-origin（不含 allow-scripts）：脚本/弹窗照旧全禁；开同源仅为父级可量内容高度，让滚动与进度由外层容器接管
+        iframe.setAttribute("sandbox", "allow-same-origin");
+        iframe.style.cssText = "width:100%;border:0;background:#fafaf9;display:block";
         iframe.srcdoc = DOC_CSS + html;
-        ref.current?.appendChild(iframe);
-        const startPct = typeof initialProgress?.locator?.scroll === "number" ? initialProgress.locator.scroll : 0;
-        if (startPct > 0) {
-          iframe.addEventListener("load", () => {
-            // 沙箱内不能读 scrollHeight——用 window.scrollTo 百分比近似
-            try {
-              const doc = iframe.contentWindow;
-              if (doc !== null) {
-                const h = doc.document.body.scrollHeight - doc.innerHeight;
-                doc.scrollTo(0, h * (startPct / 100));
-              }
-            } catch {
-              /* 跨域限制则忽略 */
+        const measure = () => {
+          try {
+            const d = iframe.contentDocument;
+            if (d?.body) {
+              const h = Math.max(d.body.scrollHeight, d.documentElement?.scrollHeight ?? 0);
+              if (h > 0) iframe.style.height = `${h}px`;
             }
-          });
-        }
+          } catch {
+            /* 不可达：同源沙箱 */
+          }
+        };
+        const startPct = typeof initialProgress?.locator?.scroll === "number" ? initialProgress.locator.scroll : 0;
+        iframe.addEventListener("load", () => {
+          measure();
+          setTimeout(measure, 500); // 图片/字体后到时再校一次高度
+          if (startPct > 0) {
+            const el = wrapRef.current;
+            if (el) el.scrollTop = (el.scrollHeight - el.clientHeight) * (startPct / 100);
+          }
+        });
+        boxRef.current?.appendChild(iframe);
         setReady(true);
       } catch (err) {
         if (!dead) setError(err instanceof Error ? err.message : "打开文档失败");
@@ -534,18 +542,37 @@ function DocReader({
     })();
     return () => {
       dead = true;
-      ref.current?.replaceChildren();
+      boxRef.current?.replaceChildren();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.id]);
 
-  // 进度：容器滚动百分比（iframe 高度=容器高度，内部自滚，父级只能近似记录打开即 0）
+  // 进度：外层容器滚动百分比（iframe 高度=内容高、内部不滚），与 TextReader 同一套直算
   useEffect(() => {
-    if (ready) onProgress({}, 0);
+    if (!ready) return;
+    const el = wrapRef.current;
+    if (el === null || el === undefined) return;
+    const onScroll = () => {
+      const max = el.scrollHeight - el.clientHeight;
+      const pct = max <= 0 ? 100 : Math.min(100, Math.round((el.scrollTop / max) * 100));
+      if (pct !== reportedRef.current) {
+        reportedRef.current = pct;
+        onProgress({ scroll: pct }, pct);
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  return <div ref={ref} className="h-full bg-stone-50" />;
+  return (
+    <div ref={wrapRef} className="h-full overflow-y-auto bg-stone-50">
+      {!ready && <div className="text-center text-sm text-stone-400">载入中…</div>}
+      <div ref={boxRef} className={ready ? "min-h-full" : "hidden"} />
+    </div>
+  );
 }
 
 // ---------- 媒体 ----------
