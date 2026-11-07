@@ -203,8 +203,8 @@ export function TimelineView({
   const floorsRef = useRef<HTMLDivElement>(null);
 
   const effRange = axis === "ingest" ? rack.ingestRange : rack.range;
-  const fullT0 = effRange ? toUtc(effRange.start) : 0;
-  const fullT1 = effRange ? toUtc(effRange.end) : 1;
+  const fullT0 = effRange?.start != null ? toUtc(effRange.start) : 0;
+  const fullT1 = effRange?.end != null ? toUtc(effRange.end) : 1;
 
   // 每层的轴数据：一次性预计算（书序/键毫秒），切架/切轴时才重建
   const floorAxes = useMemo(() => {

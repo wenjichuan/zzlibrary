@@ -47,6 +47,8 @@ export interface LocalDevice {
   buildManifests(): Promise<Map<string, LocalManifest>>;
   /** 按路径取回清单文本（增量设备的复用条目按需取回）；无则 null */
   readManifestText?(path: string): Promise<string | null>;
+  /** 按路径取回本地墓碑记忆（含 updatedAt 与 data.blobRefs——删除记账随墓碑上云）；无则 null */
+  readTombstone?(path: string): Promise<{ updatedAt: string; data: Record<string, unknown> } | null>;
   /** 读内容块字节（按哈希找本地文件/封面）；无则 null */
   readBlob(sha256: string): Promise<Uint8Array | null>;
   /** 应用一份远端清单（合并判断可复用 merge.ts） */
@@ -104,6 +106,7 @@ export async function pull(device: LocalDevice, remote: RemoteStore): Promise<Pu
   const newPaths = new Map(cachedPaths);
   const envs: ManifestEnvelope[] = [];
   const failedPaths = new Set<string>();
+  const failedKinds = new Set<Collection>();
 
   for (const kind of COLLECTIONS) {
     const cloudHash = lib.collections[kind];
@@ -130,6 +133,7 @@ export async function pull(device: LocalDevice, remote: RemoteStore): Promise<Pu
       if (text === null) {
         report.errors.push(`清单缺失：${t.path}`);
         failedPaths.add(t.path);
+        failedKinds.add(kind);
         return;
       }
       try {
@@ -138,6 +142,7 @@ export async function pull(device: LocalDevice, remote: RemoteStore): Promise<Pu
       } catch {
         report.errors.push(`清单解析失败：${t.path}`);
         failedPaths.add(t.path);
+        failedKinds.add(kind);
       }
     });
     // 该集合在本设备视角的云端终态
@@ -172,6 +177,7 @@ export async function pull(device: LocalDevice, remote: RemoteStore): Promise<Pu
       } catch (err) {
         // 单条失败不中止（应用幂等可重入）；缓存不认领该路径，下次 pull 重试
         failedPaths.add(manifestPath(env.kind, env.uuid));
+        failedKinds.add(env.kind);
         report.errors.push(`${manifestPath(env.kind, env.uuid)}：${err instanceof Error ? err.message : String(err)}`);
       }
     }
@@ -181,7 +187,10 @@ export async function pull(device: LocalDevice, remote: RemoteStore): Promise<Pu
 
   for (const p of failedPaths) newPaths.delete(p);
   await device.setManifestCache(newPaths);
-  await device.setCollectionHashes(lib.collections);
+  // 有失败清单的集合不落哈希——否则下次 pull 因「集合未变」跳过整个集合，失败路径永不重试
+  const hashesToSave: Partial<Record<Collection, string>> = { ...lib.collections };
+  for (const k of failedKinds) delete hashesToSave[k];
+  await device.setCollectionHashes(hashesToSave);
   await device.setRevision(lib.revision ?? 0);
   return report;
 }
@@ -295,7 +304,12 @@ export async function push(
         /* 解析失败按缺失处理 */
       }
     }
-    const env = envelope(parsed.kind, parsed.uuid, now(), {}, true);
+    // 优先用本地墓碑记忆（保住 updatedAt 语义与 blobRefs 记账）；确实没有才造无记账的新墓碑。
+    // 增量构建存在让出窗口：并发删除可能错过本轮 stamps——这里把账补回来。
+    const remembered = (await device.readTombstone?.(path)) ?? null;
+    const env = remembered
+      ? envelope(parsed.kind, parsed.uuid, remembered.updatedAt, remembered.data, true)
+      : envelope(parsed.kind, parsed.uuid, now(), {}, true);
     const text = manifestText(env);
     uploads.set(path, { path, env, text, sha: await sha256Hex(text), blobs: [], tombstone: true });
   });

@@ -10,7 +10,6 @@ import type {
   SegmentConfig,
   SegmentConfigBundle,
   ShelvesDetail,
-  ShelvesOut,
   Stats,
   StagedFile,
   GcReport,
@@ -116,12 +115,10 @@ export const api = {
   fileUrl: (fileId: number) => `/api/files/${fileId}/file`,
 
   // shelves
-  shelves: (l1: number) => request<ShelvesOut>(`/api/shelves${qs({ l1 })}`),
+  shelves: (l1: number) => request<ShelvesDetail>(`/api/shelves${qs({ l1 })}`),
   shelvesOverview: (l1: number) => request<ShelvesDetail>(`/api/shelves/${l1}/overview`),
   shelfRack: (l1: number, l2: string) => request<ShelvesDetail>(`/api/shelves/${l1}/rack?l2=${encodeURIComponent(l2)}`),
   stats: () => request<Stats>("/api/stats"),
-  shelvesDetail: (l1: number) =>
-    request<ShelvesDetail>(`/api/shelves${qs({ l1, with_packages: "1" })}`),
 
   // segment config（全局默认 + 二级覆盖 + 三级覆盖）
   segmentConfig: () => request<SegmentConfigBundle>("/api/segment-config"),

@@ -57,7 +57,10 @@ export default function LibraryPage() {
         const vm = buildRackVMs(d).find((r) => l2KeyOf(r.key) === l2key) ?? null;
         if (vm !== null) setRackVMs((prev) => new Map(prev).set(l2key, vm));
       })
-      .catch((err) => push("error", err instanceof Error ? err.message : "加载失败"));
+      .catch((err) => {
+        setSelectedRack(null); // 失败退回侧视——避免卡在「正在上架…」且无返回按钮
+        push("error", err instanceof Error ? err.message : "加载失败");
+      });
   };
 
   const openPackage = async (pkgId: number) => {

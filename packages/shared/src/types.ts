@@ -1,3 +1,5 @@
+import type { FullSyncReport, ShelvesPayload } from "@zzlibrary/core";
+
 /** 与后端 schemas.py 对齐的类型定义（资料包模型）。 */
 
 export type BookStatus = "未读" | "在读" | "已读";
@@ -135,33 +137,6 @@ export interface ShelfSegment {
 }
 
 /** 组（二级分类）内比例时间轴的统一范围：各层分段并集 ∪ 藏书日期。 */
-export interface ShelfRange {
-  start: string;
-  end: string;
-}
-
-export interface ShelfInfo {
-  l3: CategoryRef | null;
-  segments: ShelfSegment[];
-  config?: SegmentConfig | null;
-  counts: Record<string, number>;
-  total: number;
-}
-
-export interface ShelfGroup {
-  l2: CategoryRef | null;
-  range: ShelfRange | null;
-  has_undated: boolean;
-  shelves: ShelfInfo[];
-  total: number;
-}
-
-export interface ShelvesOut {
-  l1: CategoryRef;
-  groups: ShelfGroup[];
-  total: number;
-}
-
 /** 馆藏统计（GET /api/stats，首页四卡） */
 export interface Stats {
   packages: number;
@@ -169,25 +144,6 @@ export interface Stats {
   l1: number;
   l2: number;
   l3: number;
-}
-
-export interface ShelfPlacement {
-  segment_key: string;
-  package: ShelfPackage;
-}
-
-export interface ShelfInfoDetail extends ShelfInfo {
-  packages: ShelfPlacement[];
-}
-
-export interface ShelfGroupDetail extends Omit<ShelfGroup, "shelves"> {
-  shelves: ShelfInfoDetail[];
-}
-
-export interface ShelvesDetail {
-  l1: CategoryRef;
-  groups: ShelfGroupDetail[];
-  total: number;
 }
 
 export interface ShelfPackage {
@@ -208,7 +164,7 @@ export interface Progress {
   updated_at: string;
 }
 
-// ---------- 同步与备份 ----------
+// ---------- 同步与备份（SyncReport/同步报告的 wire 形状以 core 同步引擎为单源） ----------
 
 export interface SyncConfig {
   provider: "fs" | "webdav" | "s3";
@@ -218,17 +174,6 @@ export interface SyncConfig {
   s3?: {
     endpoint: string; region: string; bucket: string;
     accessKeyId: string; secretAccessKey: string; prefix?: string;
-  };
-}
-
-export interface SyncReport {
-  pull: {
-    cloudEmpty: boolean; fetched: number; applied: number; localNewer: number;
-    tombstones: number; noop: number; errors: string[]; revision: number;
-  };
-  push: {
-    uploadedManifests: number; tombstoned: number; uploadedBlobs: number;
-    uploadedBlobBytes: number; skippedNoBlob: number; revision: number; errors: string[];
   };
 }
 
@@ -250,3 +195,9 @@ export interface SyncStatus {
   pendingHashFiles: number;
   running: boolean;
 }
+
+/** 同步报告：core 引擎出参的别名（字段漂移在此编译期暴露）。 */
+export type SyncReport = FullSyncReport;
+
+/** 书架详情载荷：core buildShelves 出参的别名（server/web 与聚合器在此编译期绑定）。 */
+export type ShelvesDetail = ShelvesPayload;

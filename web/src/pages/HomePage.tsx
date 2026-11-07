@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type ShelvesOut, type Stats } from "@zzlibrary/shared/client";
+import { api, type ShelvesDetail, type Stats } from "@zzlibrary/shared/client";
 import { Button, PageHeader, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 
 export default function HomePage() {
   const [stats, setStats] = useState<Stats | null>(null);
-  const [shelvesByL1, setShelvesByL1] = useState<Record<string, ShelvesOut>>({});
+  const [shelvesByL1, setShelvesByL1] = useState<Record<string, ShelvesDetail>>({});
   const tree = useCategories((s) => s.tree);
   const load = useCategories((s) => s.load);
 
@@ -19,17 +19,17 @@ export default function HomePage() {
     void api.stats().then(setStats).catch(() => undefined);
   }, []);
 
-  // 概览卡并行拉取（串行瀑布在分类多时会把首页拖成 N×RTT）
+  // 概览卡：SQL 聚合计数的轻载荷（零包体零 N+1），并行拉取
   useEffect(() => {
     void Promise.all(
       tree.map((node) =>
         api
-          .shelves(node.id)
+          .shelvesOverview(node.id)
           .then((r) => [node.id, r] as const)
           .catch(() => null),
       ),
     ).then((rows) => {
-      setShelvesByL1(Object.fromEntries(rows.filter((r): r is [number, ShelvesOut] => r !== null)));
+      setShelvesByL1(Object.fromEntries(rows.filter((r): r is [number, ShelvesDetail] => r !== null)));
     });
   }, [tree]);
 

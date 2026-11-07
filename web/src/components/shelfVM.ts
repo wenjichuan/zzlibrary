@@ -21,7 +21,7 @@ export interface RackVM {
   key: string;
   label: string;
   total: number;
-  range: { start: string; end: string } | null; // 发布时间轴范围（各层并集）
+  range: { start: string | null; end: string | null } | null; // 发布时间轴范围（各层并集；wire 契约允许端点为 null）
   ingestRange: { start: string; end: string } | null; // 入库时间轴范围（created_at 并集）
   floors: FloorVM[];
 }

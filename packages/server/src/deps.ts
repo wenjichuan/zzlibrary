@@ -75,10 +75,3 @@ export function resolvePaths(db: DatabaseSync, paths: PathIn[] | null | undefine
 }
 
 /** 查询参数解析：数字 → (id, False)；'none' → (None, True)；缺失 → (None, False)。 */
-export function parseIdFilter(raw: string | null | undefined): [number | null, boolean] {
-  if (raw === null || raw === undefined || raw === "") return [null, false];
-  if (raw === "none") return [null, true];
-  const n = Number(raw);
-  if (Number.isInteger(n) && String(n) === raw.trim()) return [n, false];
-  throw new HTTPException(422, { message: `分类参数无效：${raw}` });
-}

@@ -489,6 +489,22 @@ export class SqliteSyncDevice implements LocalDevice {
     return row?.text ?? null;
   }
 
+  async readTombstone(path: string): Promise<{ updatedAt: string; data: Record<string, unknown> } | null> {
+    const row = pstmt(this.db, "SELECT updated_at, blob_refs FROM sync_tombstones WHERE path = ?").get(path) as
+      | { updated_at: string; blob_refs: string | null }
+      | undefined;
+    if (row === undefined) return null;
+    let refs: unknown = undefined;
+    if (row.blob_refs !== null) {
+      try {
+        refs = JSON.parse(row.blob_refs);
+      } catch {
+        refs = undefined;
+      }
+    }
+    return { updatedAt: this.stampOf(row.updated_at), data: { blobRefs: refs } };
+  }
+
 
   async readBlob(hash: string): Promise<Uint8Array | null> {
     const f = this.db

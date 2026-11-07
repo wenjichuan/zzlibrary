@@ -8,5 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "@zzlibrary/core": "*"
   }
 }

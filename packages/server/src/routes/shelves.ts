@@ -5,14 +5,14 @@ import {
   buildShelves,
   computeGrid,
   displayDate,
-  filterShelfPackages,
   resolveConfigWithScope,
   type AggCategory,
   type AggPackage,
   type SegmentConfigRow,
 } from "@zzlibrary/core";
 import type { Env } from "../env";
-import { getCategory, parseIdFilter, type CategoryRow } from "../deps";
+import { getCategory, type CategoryRow } from "../deps";
+import type { ShelvesDetail } from "@zzlibrary/shared";
 import { isoFromSqlite } from "../db";
 import type { FileRow, PackageRow } from "../repo";
 
@@ -31,34 +31,33 @@ shelvesRouter.get("/api/stats", (c) => {
   });
 });
 
-/** 书架侧视概览：SQL GROUP BY 聚合计数（(包,l2,l3) 三元组去重语义下推），零包体装载零 N+1——大馆藏的默认入口。
- * 返回与 ShelvesDetail 同构的轻载荷（segments 空、无 packages），前端 buildRackVMs 直接消费。 */
-shelvesRouter.get("/api/shelves/:l1Id/overview", (c) => {
-  const db = c.get("db");
-  const l1 = l1Or404(db, Number(c.req.param("l1Id")));
-  const grp = db
-    .prepare(
-      "SELECT pp.l2_id AS l2_id, COUNT(DISTINCT pp.package_id) AS total," +
-        " MIN(p.publish_date) AS rmin, MAX(p.publish_date) AS rmax," +
-        " MAX(CASE WHEN p.publish_date IS NULL THEN 1 ELSE 0 END) AS has_und" +
-        " FROM package_paths pp JOIN packages p ON p.id = pp.package_id WHERE pp.l1_id = ? GROUP BY pp.l2_id",
-    )
-    .all(l1.id) as Array<{ l2_id: number | null; total: number; rmin: string | null; rmax: string | null; has_und: number }>;
+/** 轻载荷书架（侧视/概览/计数共用）：SQL 聚合计数（(包,l2,l3) 三元组去重下推）+ 每层 SQL 日期范围算真实段带网格。
+ * 零包体装载零 N+1——大馆藏的默认入口；段带计数为 0（进架 /rack 才取实数）。 */
+function buildLightShelves(db: Env["Variables"]["db"], l1: CategoryRow): ShelvesDetail {
+  const { groups: grp, total } = l1GroupCounts(db, l1.id);
   const sub = db
     .prepare(
-      "SELECT pp.l2_id AS l2_id, pp.l3_id AS l3_id, COUNT(DISTINCT pp.package_id) AS total" +
-        " FROM package_paths pp WHERE pp.l1_id = ? GROUP BY pp.l2_id, pp.l3_id",
+      "SELECT pp.l2_id AS l2_id, pp.l3_id AS l3_id, COUNT(DISTINCT pp.package_id) AS total," +
+        " MIN(p.publish_date) AS rmin, MAX(p.publish_date) AS rmax" +
+        " FROM package_paths pp JOIN packages p ON p.id = pp.package_id WHERE pp.l1_id = ? GROUP BY pp.l2_id, pp.l3_id",
     )
-    .all(l1.id) as Array<{ l2_id: number | null; l3_id: number | null; total: number }>;
-  const total = (db
-    .prepare("SELECT COUNT(DISTINCT package_id) AS n FROM package_paths WHERE l1_id = ?")
-    .get(l1.id) as { n: number }).n;
+    .all(l1.id) as Array<{
+    l2_id: number | null;
+    l3_id: number | null;
+    total: number;
+    rmin: string | null;
+    rmax: string | null;
+  }>;
 
-  const subByGroup = new Map<number | null, Array<{ l3: { id: number; name: string } | null; total: number }>>();
+  const configRows = loadConfigRows(db);
+  const subByGroup = new Map<
+    number | null,
+    Array<{ l3: { id: number; name: string } | null; total: number; rmin: string | null; rmax: string | null }>
+  >();
   for (const s of sub) {
     const l3cat = s.l3_id === null ? null : getCategory(db, s.l3_id);
     const arr = subByGroup.get(s.l2_id) ?? [];
-    arr.push({ l3: l3cat ? { id: l3cat.id, name: l3cat.name } : null, total: s.total });
+    arr.push({ l3: l3cat ? { id: l3cat.id, name: l3cat.name } : null, total: s.total, rmin: s.rmin, rmax: s.rmax });
     subByGroup.set(s.l2_id, arr);
   }
   const groups = grp
@@ -67,24 +66,43 @@ shelvesRouter.get("/api/shelves/:l1Id/overview", (c) => {
       return {
         cat: l2cat,
         g,
-        shelves: (subByGroup.get(g.l2_id) ?? []).map((s) => ({
-          l3: s.l3,
-          segments: [] as unknown[],
-          config: { scope: "l3", l2_id: g.l2_id, l3_id: s.l3?.id ?? null, mode: "year", params: {} },
-          counts: {},
-          total: s.total,
-        })),
+        shelves: (subByGroup.get(g.l2_id) ?? []).map((s) => {
+          const { scope, config } = resolveConfigWithScope(configRows, g.l2_id, s.l3?.id ?? null);
+          const dates = s.rmin !== null ? [s.rmin] : []; // 只需定范围；computeGrid 取边界
+          if (s.rmax !== null && s.rmax !== s.rmin) dates.push(s.rmax);
+          const grid = s.rmin !== null ? computeGrid(dates, config) : [];
+          return {
+            l3: s.l3,
+            segments: grid.map((seg) => ({
+              key: seg.key,
+              label: seg.label,
+              alias: seg.alias ?? null,
+              start: displayDate(seg.start),
+              end: displayDate(seg.end),
+              count: 0, // 轻载荷不计段带计数（进架 /rack 由 buildShelves 取实数）
+            })),
+            config: { scope, l2_id: g.l2_id, l3_id: s.l3?.id ?? null, mode: config.mode, params: config.params ?? {} },
+            counts: {} as Record<string, number>,
+            total: s.total,
+          };
+        }),
       };
     })
     .sort((a, b) => (a.cat?.sort_order ?? Infinity) - (b.cat?.sort_order ?? Infinity))
     .map(({ cat, g, shelves }) => ({
       l2: cat ? { id: cat.id, name: cat.name } : null,
-      range: g.rmin !== null ? { start: g.rmin, end: g.rmax } : null,
+      range: g.rmin !== null && g.rmax !== null ? { start: g.rmin, end: g.rmax } : null,
       has_undated: g.has_und === 1,
       shelves,
       total: g.total,
     }));
-  return c.json({ l1: { id: l1.id, name: l1.name }, groups, total });
+  return { l1: { id: l1.id, name: l1.name }, groups, total };
+}
+
+shelvesRouter.get("/api/shelves/:l1Id/overview", (c) => {
+  const db = c.get("db");
+  const l1 = l1Or404(db, Number(c.req.param("l1Id")));
+  return c.json(buildLightShelves(db, l1) satisfies ShelvesDetail);
 });
 
 /** 单架详情（正面时间轴入口）：只装载该二级组的包（formats 批量聚合），进架才拉包体——替代整 L1 全量 with_packages。 */
@@ -229,69 +247,39 @@ function loadConfigRows(db: Env["Variables"]["db"]): SegmentConfigRow[] {
   });
 }
 
+/** L1 组级计数（SQL 聚合，零包体）：overview 与 /api/shelves 计数路径共用。 */
+function l1GroupCounts(
+  db: Env["Variables"]["db"],
+  l1Id: number,
+): { groups: Array<{ l2_id: number | null; total: number; rmin: string | null; rmax: string | null; has_und: number }>; total: number } {
+  const groups = db
+    .prepare(
+      "SELECT pp.l2_id AS l2_id, COUNT(DISTINCT pp.package_id) AS total," +
+        " MIN(p.publish_date) AS rmin, MAX(p.publish_date) AS rmax," +
+        " MAX(CASE WHEN p.publish_date IS NULL THEN 1 ELSE 0 END) AS has_und" +
+        " FROM package_paths pp JOIN packages p ON p.id = pp.package_id WHERE pp.l1_id = ? GROUP BY pp.l2_id",
+    )
+    .all(l1Id) as Array<{ l2_id: number | null; total: number; rmin: string | null; rmax: string | null; has_und: number }>;
+  const total = (db
+    .prepare("SELECT COUNT(DISTINCT package_id) AS n FROM package_paths WHERE l1_id = ?")
+    .get(l1Id) as { n: number }).n;
+  return { groups, total };
+}
+
 shelvesRouter.get("/api/shelves", (c) => {
   const db = c.get("db");
   const l1Id = Number(c.req.query("l1"));
   if (!Number.isInteger(l1Id)) throw new HTTPException(422, { message: "必须指定一级分类" });
+  const l1Cat = l1Or404(db, l1Id);
   const includePackages = ["1", "true"].includes(c.req.query("with_packages") ?? "");
-  const l1Cat = l1Or404(db, l1Id);
+
+  // 计数路径：SQL 聚合轻载荷（含真实段带网格；与 overview 同构）
+  if (!includePackages) {
+    return c.json(buildLightShelves(db, l1Cat) satisfies ShelvesDetail);
+  }
+
+  // with_packages 兼容路径（测试/调试用）：全量包聚合
   const pkgs = loadL1Packages(db, l1Id);
-
-  // 聚合用到的二级/三级分类
-  const catIds = new Set<number>();
-  const pathStmt = db.prepare("SELECT l2_id, l3_id FROM package_paths WHERE l1_id = ?");
-  for (const p of pathStmt.all(l1Id) as Array<{ l2_id: number | null; l3_id: number | null }>) {
-    if (p.l2_id !== null) catIds.add(p.l2_id);
-    if (p.l3_id !== null) catIds.add(p.l3_id);
-  }
-  const cats = new Map<number, AggCategory>();
-  if (catIds.size > 0) {
-    const placeholders = [...catIds].map(() => "?").join(",");
-    for (const row of db
-      .prepare(`SELECT id, name, sort_order FROM categories WHERE id IN (${placeholders})`)
-      .all(...catIds) as Array<{ id: number; name: string; sort_order: number }>) {
-      cats.set(row.id, row);
-    }
-  }
-  return c.json(buildShelves(l1Cat, pkgs, cats, loadConfigRows(db), includePackages));
-});
-
-shelvesRouter.get("/api/shelves/packages", (c) => {
-  const db = c.get("db");
-  const l1Id = Number(c.req.query("l1"));
-  if (!Number.isInteger(l1Id)) throw new HTTPException(422, { message: "必须指定一级分类" });
-  const l1Cat = l1Or404(db, l1Id);
-  const [l2Id, l2None] = parseIdFilter(c.req.query("l2"));
-  const [l3Id, l3None] = parseIdFilter(c.req.query("l3"));
-  const segment = c.req.query("segment") ?? null;
-  if (l2Id === null && !l2None) {
-    throw new HTTPException(422, { message: "必须指定二级分类（数字 id 或 none）" });
-  }
-
-  const pkgs = loadL1Packages(db, l1Cat.id);
-  const groupPkgs = pkgs.filter((p) =>
-    p.paths.some(
-      (path) => path.l1_id === l1Cat.id && (l2None ? path.l2_id === null : path.l2_id === l2Id),
-    ),
-  );
-  // 组内去重后的包日期（同一包多条路径只计一次）；指定三级时用该层的覆盖配置
-  const groupUnique = new Map(groupPkgs.map((p) => [p.id, p]));
-  const configRows = loadConfigRows(db);
-  const { config } = resolveConfigWithScope(configRows, l2None ? null : l2Id, l3None ? null : l3Id);
-  const grid = computeGrid(
-    [...groupUnique.values()].map((p) => p.publish_date),
-    config,
-  );
-  const result = filterShelfPackages(pkgs, l1Cat.id, l2Id, l2None, l3Id, l3None, grid, segment);
-  return c.json(
-    result.map((p) => ({
-      id: p.id,
-      title: p.title,
-      authors: p.authors,
-      publish_date: displayDate(p.publish_date),
-      file_count: p.file_count,
-      formats: [...new Set(p.formats ?? [])].sort(),
-      status: p.status,
-    })),
-  );
+  const cats = collectCats(db, pkgs);
+  return c.json(buildShelves({ id: l1Cat.id, name: l1Cat.name }, pkgs, cats, loadConfigRows(db), true));
 });

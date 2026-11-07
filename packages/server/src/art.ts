@@ -209,7 +209,9 @@ export async function makeSpine(title: string, palette: Palette, height = SPINE_
   return sharp(Buffer.from(parts.join(""))).png().toBuffer();
 }
 
-/** 生成（或重生成）包的封面+书脊 PNG。cover 传 null 时用占位封面。 */
+/** 生成（或重生成）包的封面+书脊 PNG。
+ * 封面只在「来了新真封面」或「封面文件缺失（补占位）」时写入——重编码会造成字节漂移，
+ * 偏离 cover_sha256 登记哈希，破坏同步取回校验；书脊（含标题）每次重生成。 */
 export async function regeneratePackageArt(
   artDir: string,
   packageId: number,
@@ -217,11 +219,13 @@ export async function regeneratePackageArt(
   coverBuffer: Buffer | null,
 ): Promise<void> {
   const { mkdirSync, writeFileSync, readFileSync, existsSync } = await import("node:fs");
-  const cover = await normalizeCover(coverBuffer, title);
   const coverPath = `${artDir}/covers/${packageId}.png`;
-  mkdirSync(`${artDir}/covers`, { recursive: true });
-  writeFileSync(coverPath, cover);
-  const palette = await paletteFromCover(existsSync(coverPath) ? readFileSync(coverPath) : null, title);
+  if (coverBuffer !== null || !existsSync(coverPath)) {
+    const cover = await normalizeCover(coverBuffer, title);
+    mkdirSync(`${artDir}/covers`, { recursive: true });
+    writeFileSync(coverPath, cover);
+  }
+  const palette = await paletteFromCover(readFileSync(coverPath), title);
   mkdirSync(`${artDir}/spines`, { recursive: true });
   writeFileSync(`${artDir}/spines/${packageId}.png`, await makeSpine(title, palette));
 }
