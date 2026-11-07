@@ -10,6 +10,12 @@ export const FORMAT_ICONS: Record<string, string> = {
   jpg: "🖼", png: "🖼", gif: "🖼", webp: "🖼",
 };
 
+/** 浏览器新标签页能直接渲染的格式（直链后内联展示）；其余格式（epub/docx/pptx/xlsx/mkv/未知）浏览器只会下载 */
+const BROWSER_VIEWABLE = new Set([
+  "pdf", "txt", "md", "html", "jpg", "png", "gif", "webp",
+  "mp4", "m4v", "webm", "mov", "mp3", "m4a", "wav", "ogg", "flac",
+]);
+
 function metaText(file: FileDetail, showProgress?: boolean): string {
   return [
     String(file.format).toUpperCase(),
@@ -92,7 +98,7 @@ export default function FileRow({
           target="_blank"
           rel="noreferrer"
         >
-          打开
+          {BROWSER_VIEWABLE.has(file.format) ? "打开" : "下载"}
         </a>
       </div>
     </div>
