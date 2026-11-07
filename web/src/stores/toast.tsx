@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 type ToastKind = "success" | "error" | "info";
 interface Toast {
@@ -20,8 +20,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => [...prev, { id, kind, text }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3600);
   }, []);
+  const value = useMemo(() => ({ push }), [push]); // 稳定引用：toast 增删不再连带全站消费页重渲染
   return (
-    <ToastContext.Provider value={{ push }}>
+    <ToastContext.Provider value={value}>
       {children}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
         {toasts.map((t) => (

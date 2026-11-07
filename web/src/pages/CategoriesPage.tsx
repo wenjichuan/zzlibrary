@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type CategoryNode } from "@zzlibrary/shared";
 import { Button, Input, PageHeader, Spinner } from "../components/ui";
 import { flatten, useCategories } from "../stores/categories";
@@ -8,6 +8,9 @@ export default function CategoriesPage() {
   const tree = useCategories((s) => s.tree);
   const loaded = useCategories((s) => s.loaded);
   const load = useCategories((s) => s.load);
+  const applyNode = useCategories((s) => s.applyNode);
+  const addChild = useCategories((s) => s.addChild);
+  const removeNode = useCategories((s) => s.removeNode);
 
   useEffect(() => {
     load();
@@ -16,18 +19,16 @@ export default function CategoriesPage() {
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
   const { push } = useToast();
-  const { l1, l2 } = flatten(tree);
-
-  const refresh = () => load(true);
+  const { l1, l2 } = useMemo(() => flatten(tree), [tree]);
 
   const create = async () => {
     if (!newName.trim()) return;
     try {
-      await api.createCategory(newName.trim(), creatingUnder ?? null);
+      const node = await api.createCategory(newName.trim(), creatingUnder ?? null);
       push("success", "已创建");
       setCreatingUnder(undefined);
       setNewName("");
-      refresh();
+      addChild(creatingUnder ?? null, node); // 就地插入，不整树重拉
     } catch (err) {
       push("error", err instanceof Error ? err.message : "创建失败");
     }
@@ -36,10 +37,10 @@ export default function CategoriesPage() {
   const rename = async () => {
     if (!renaming || !renaming.name.trim()) return;
     try {
-      await api.updateCategory(renaming.id, { name: renaming.name.trim() });
+      const node = await api.updateCategory(renaming.id, { name: renaming.name.trim() });
       push("success", "已重命名");
       setRenaming(null);
-      refresh();
+      applyNode(node);
     } catch (err) {
       push("error", err instanceof Error ? err.message : "重命名失败");
     }
@@ -50,7 +51,7 @@ export default function CategoriesPage() {
     try {
       await api.deleteCategory(node.id);
       push("success", "已删除");
-      refresh();
+      removeNode(node.id);
     } catch (err) {
       push("error", err instanceof Error ? err.message : "删除失败");
     }
@@ -58,8 +59,8 @@ export default function CategoriesPage() {
 
   const move = async (node: CategoryNode, direction: -1 | 1) => {
     try {
-      await api.updateCategory(node.id, { sort_order: node.sort_order + direction * 1.5 });
-      refresh();
+      const updated = await api.updateCategory(node.id, { sort_order: node.sort_order + direction * 1.5 });
+      applyNode(updated);
     } catch (err) {
       push("error", err instanceof Error ? err.message : "移动失败");
     }
@@ -67,9 +68,9 @@ export default function CategoriesPage() {
 
   const moveTo = async (node: CategoryNode, parentId: number | null) => {
     try {
-      await api.updateCategory(node.id, { parent_id: parentId });
+      const updated = await api.updateCategory(node.id, { parent_id: parentId });
       push("success", "已移动");
-      refresh();
+      applyNode(updated);
     } catch (err) {
       push("error", err instanceof Error ? err.message : "移动失败");
     }

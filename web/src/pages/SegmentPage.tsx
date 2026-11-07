@@ -41,12 +41,27 @@ export default function SegmentPage() {
     try {
       await api.putGlobalSegmentConfig(globalCfg);
       push("success", "全局默认已保存");
-      await load();
+      setBundle((b) => (b ? { ...b, global: globalCfg } : b)); // 就地更新，不整包重拉
     } catch (err) {
       push("error", err instanceof Error ? err.message : "保存失败");
     } finally {
       setSaving(false);
     }
+  };
+
+  /** 单条覆盖就地更新/删除（接口成功后本地改 bundle），不整包重拉 */
+  const patchOverride = (cfg: SegmentConfig) => {
+    setBundle((b) => {
+      if (!b) return b;
+      const key = (o: SegmentConfig) => (o.scope === "l2" ? `l2:${o.l2_id}` : `l3:${o.l3_id}`);
+      const k = key(cfg);
+      return { ...b, overrides: [...b.overrides.filter((o) => key(o) !== k), cfg] };
+    });
+  };
+  const dropOverride = (scope: "l2" | "l3", id: number) => {
+    setBundle((b) =>
+      b ? { ...b, overrides: b.overrides.filter((o) => (scope === "l2" ? o.l2_id !== id : o.l3_id !== id)) } : b,
+    );
   };
 
   const l2Override = new Map(
@@ -93,11 +108,19 @@ export default function SegmentPage() {
                         name={`${l1.name} / ${l2.name}`}
                         initial={l2Override.get(l2.id)}
                         defaultCfg={{ scope: "l2", l2_id: l2.id, l3_id: null, mode: "year", params: {} }}
-                        onSaved={() => void load()}
                         onSave={async (cfg) => {
-                          await api.putSegmentOverride(l2.id, { ...cfg, scope: "l2", l2_id: l2.id, l3_id: null });
+                          const full = { ...cfg, scope: "l2", l2_id: l2.id, l3_id: null } as SegmentConfig;
+                          await api.putSegmentOverride(l2.id, full);
+                          patchOverride(full);
                         }}
-                        onDelete={l2Override.has(l2.id) ? () => api.deleteSegmentOverride(l2.id) : undefined}
+                        onDelete={
+                          l2Override.has(l2.id)
+                            ? async () => {
+                                await api.deleteSegmentOverride(l2.id);
+                                dropOverride("l2", l2.id);
+                              }
+                            : undefined
+                        }
                       />
                       {l2.children.map((l3) => (
                         <div key={l3.id} className="pl-8">
@@ -106,16 +129,19 @@ export default function SegmentPage() {
                             small
                             initial={l3Override.get(l3.id)}
                             defaultCfg={{ scope: "l3", l2_id: l2.id, l3_id: l3.id, mode: "year", params: {} }}
-                            onSaved={() => void load()}
                             onSave={async (cfg) => {
-                              await api.putL3SegmentOverride(l3.id, {
-                                ...cfg,
-                                scope: "l3",
-                                l2_id: l2.id,
-                                l3_id: l3.id,
-                              });
+                              const full = { ...cfg, scope: "l3", l2_id: l2.id, l3_id: l3.id } as SegmentConfig;
+                              await api.putL3SegmentOverride(l3.id, full);
+                              patchOverride(full);
                             }}
-                            onDelete={l3Override.has(l3.id) ? () => api.deleteL3SegmentOverride(l3.id) : undefined}
+                            onDelete={
+                              l3Override.has(l3.id)
+                                ? async () => {
+                                    await api.deleteL3SegmentOverride(l3.id);
+                                    dropOverride("l3", l3.id);
+                                  }
+                                : undefined
+                            }
                           />
                         </div>
                       ))}
@@ -236,7 +262,6 @@ function ConfigRow({
   defaultCfg,
   onSave,
   onDelete,
-  onSaved,
 }: {
   name: string;
   small?: boolean;
@@ -244,19 +269,16 @@ function ConfigRow({
   defaultCfg: SegmentConfig;
   onSave: (cfg: SegmentConfig) => Promise<unknown>;
   onDelete: (() => Promise<unknown>) | undefined;
-  onSaved?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [cfg, setCfg] = useState<SegmentConfig>(initial ?? defaultCfg);
   const { push } = useToast();
-  const notifySaved = onSaved ?? (() => {});
 
   const save = async () => {
     try {
       await onSave({ ...cfg, params: structuredClone(cfg.params) });
       push("success", `已保存「${name}」的分段配置`);
       setEditing(false);
-      notifySaved();
     } catch (err) {
       push("error", err instanceof Error ? err.message : "保存失败");
     }
@@ -294,7 +316,6 @@ function ConfigRow({
                 try {
                   await onDelete();
                   push("success", "已删除覆盖");
-                  notifySaved();
                 } catch (err) {
                   push("error", err instanceof Error ? err.message : "删除失败");
                 }

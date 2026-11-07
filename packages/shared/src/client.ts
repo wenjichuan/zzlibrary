@@ -76,7 +76,8 @@ export const api = {
   listPackages: (params: {
     l1?: string; l2?: string; l3?: string; q?: string; format?: string; status?: string;
     undated?: string; sort?: string; page?: number; page_size?: number;
-  }) => request<PackagePage>(`/api/packages${qs(params)}`),
+  }, signal?: AbortSignal) =>
+    request<PackagePage>(`/api/packages${qs(params)}`, signal ? { signal } : undefined),
   getPackage: (id: number) => request<PackageDetail>(`/api/packages/${id}`),
   updatePackage: (id: number, patch: Partial<PackageMetaInput>) =>
     request<PackageDetail>(`/api/packages/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),

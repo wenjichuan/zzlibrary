@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CANONICAL_FORMATS } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail, type Package, type PackageDetail, type PackagePage } from "@zzlibrary/shared";
 import PackageMetaForm, { metaFromPackage, metaToInput, type MetaFormValue } from "../components/PackageMetaForm";
@@ -71,6 +71,8 @@ export default function PackagesPage() {
     };
   });
   const [page, setPage] = useState(1);
+  /** 搜索框即时文本：防抖后并入 filters.q，避免逐键全表查询 */
+  const [qText, setQText] = useState(() => new URLSearchParams(window.location.search).get("q") ?? "");
   const [editing, setEditing] = useState<PackageDetail | null>(null);
   const [detail, setDetail] = useState<PackageDetail | null>(null);
   const [reading, setReading] = useState<FileDetail | null>(null);
@@ -82,15 +84,20 @@ export default function PackagesPage() {
     loadCategories();
   }, [loadCategories]);
 
+  const abortRef = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
+    abortRef.current?.abort(); // 取消上一次在途请求：慢响应后到不再覆盖新结果
+    const ac = new AbortController();
+    abortRef.current = ac;
     setLoading(true);
     try {
-      const resp = await api.listPackages({ ...filters, page, page_size: 20 });
+      const resp = await api.listPackages({ ...filters, page, page_size: 20 }, ac.signal);
+      if (ac.signal.aborted) return;
       setData(resp);
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "加载失败");
+      if (!ac.signal.aborted) push("error", err instanceof Error ? err.message : "加载失败");
     } finally {
-      setLoading(false);
+      if (!ac.signal.aborted) setLoading(false);
     }
   }, [filters, page, push]);
 
@@ -98,7 +105,17 @@ export default function PackagesPage() {
     void load();
   }, [load]);
 
-  useEffect(() => setPage(1), [filters]);
+  /** 过滤条件变化统一入口：与页码归一在同一批 setState 内生效，避免先按旧页码多发一次请求 */
+  const applyFilters = useCallback((updater: (f: typeof filters) => typeof filters) => {
+    setFilters((f) => updater(f));
+    setPage(1);
+  }, []);
+
+  // 搜索防抖：停顿 300ms 才并入查询（回车立即）
+  useEffect(() => {
+    const t = window.setTimeout(() => applyFilters((f) => (f.q === qText ? f : { ...f, q: qText })), 300);
+    return () => window.clearTimeout(t);
+  }, [qText, applyFilters]);
 
   const { l1, l2 } = flatten(tree);
   const l1Node = l1.find((n) => String(n.id) === filters.l1);
@@ -142,7 +159,8 @@ export default function PackagesPage() {
     try {
       await api.deletePackage(pkg.id);
       push("success", "已删除");
-      void load();
+      // 乐观更新：就地移除该行，不整表重拉
+      setData((prev) => (prev ? { ...prev, total: prev.total - 1, items: prev.items.filter((p) => p.id !== pkg.id) } : prev));
     } catch (err) {
       push("error", err instanceof Error ? err.message : "删除失败");
     }
@@ -165,11 +183,13 @@ export default function PackagesPage() {
         <Input
           className="w-56"
           placeholder="搜索包名/作者/备注…"
-          value={filters.q}
-          onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
-          onKeyDown={(e) => e.key === "Enter" && setPage(1)}
+          value={qText}
+          onChange={(e) => setQText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") applyFilters((f) => (f.q === qText ? f : { ...f, q: qText }));
+          }}
         />
-        <Select className="w-32" value={filters.l1} onChange={(e) => setFilters((f) => ({ ...f, l1: e.target.value, l2: "", l3: "" }))}>
+        <Select className="w-32" value={filters.l1} onChange={(e) => applyFilters((f) => ({ ...f, l1: e.target.value, l2: "", l3: "" }))}>
           <option value="">全部分类</option>
           {l1.map((n) => (
             <option key={n.id} value={n.id}>{n.name}</option>
@@ -177,7 +197,7 @@ export default function PackagesPage() {
           <option value="none">未分类</option>
         </Select>
         {filters.l1 && (
-          <Select className="w-32" value={filters.l2} onChange={(e) => setFilters((f) => ({ ...f, l2: e.target.value, l3: "" }))}>
+          <Select className="w-32" value={filters.l2} onChange={(e) => applyFilters((f) => ({ ...f, l2: e.target.value, l3: "" }))}>
             <option value="">全部二级</option>
             {l2Options.map((n) => (
               <option key={n.id} value={n.id}>{n.name}</option>
@@ -185,28 +205,28 @@ export default function PackagesPage() {
           </Select>
         )}
         {filters.l2 && (
-          <Select className="w-32" value={filters.l3} onChange={(e) => setFilters((f) => ({ ...f, l3: e.target.value }))}>
+          <Select className="w-32" value={filters.l3} onChange={(e) => applyFilters((f) => ({ ...f, l3: e.target.value }))}>
             <option value="">全部三级</option>
             {l3Options.map((n) => (
               <option key={n.id} value={n.id}>{n.name}</option>
             ))}
           </Select>
         )}
-        <Select className="w-28" value={filters.format} onChange={(e) => setFilters((f) => ({ ...f, format: e.target.value }))}>
+        <Select className="w-28" value={filters.format} onChange={(e) => applyFilters((f) => ({ ...f, format: e.target.value }))}>
           {FORMATS.map((f) => (
             <option key={f} value={f}>{f ? `${FORMAT_ICONS[f] ?? ""} ${f.toUpperCase()}` : "全部格式"}</option>
           ))}
         </Select>
-        <Select className="w-24" value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
+        <Select className="w-24" value={filters.status} onChange={(e) => applyFilters((f) => ({ ...f, status: e.target.value }))}>
           {STATUSES.map((s) => (
             <option key={s} value={s}>{s || "全部状态"}</option>
           ))}
         </Select>
-        <Select className="w-28" value={filters.undated} onChange={(e) => setFilters((f) => ({ ...f, undated: e.target.value }))}>
+        <Select className="w-28" value={filters.undated} onChange={(e) => applyFilters((f) => ({ ...f, undated: e.target.value }))}>
           <option value="">全部时间</option>
           <option value="1">未注明时间</option>
         </Select>
-        <Select className="w-28" value={filters.sort} onChange={(e) => setFilters((f) => ({ ...f, sort: e.target.value }))}>
+        <Select className="w-28" value={filters.sort} onChange={(e) => applyFilters((f) => ({ ...f, sort: e.target.value }))}>
           {Object.entries(SORTS).map(([v, label]) => (
             <option key={v} value={v}>{label}</option>
           ))}
@@ -325,8 +345,16 @@ export default function PackagesPage() {
           detail={editing}
           onClose={() => setEditing(null)}
           onSaved={(fresh) => {
-            setEditing(fresh ? { ...editing, ...fresh } : null);
-            void load();
+            setEditing(null);
+            if (fresh) {
+              // 保存接口已返回最新详情：就地补丁详情与列表行，不整表重拉
+              setDetail(fresh);
+              setData((prev) =>
+                prev ? { ...prev, items: prev.items.map((p) => (p.id === fresh.id ? { ...p, ...fresh } : p)) } : prev,
+              );
+            } else {
+              void load(); // 整包删除/部分生效的兜底场景
+            }
           }}
         />
       )}
@@ -349,10 +377,14 @@ function DetailModal({
 }) {
   const { push } = useToast();
   const [releasing, setReleasing] = useState(false);
-  const lastRead = [...detail.files]
-    .filter((f) => f.progress !== null)
-    .sort((a, b) => (b.progress!.updated_at < a.progress!.updated_at ? -1 : 1))[0] ?? null;
-  const anyLocal = detail.files.some((f) => f.local !== false);
+  const lastRead = useMemo(
+    () =>
+      [...detail.files]
+        .filter((f) => f.progress !== null)
+        .sort((a, b) => (b.progress!.updated_at < a.progress!.updated_at ? -1 : 1))[0] ?? null,
+    [detail.files],
+  );
+  const anyLocal = useMemo(() => detail.files.some((f) => f.local !== false), [detail.files]);
 
   const release = async () => {
     setReleasing(true);
@@ -513,9 +545,9 @@ function EditModal({
         await api.addPackageFile(detail.id, a.stageId);
       }
       setPendingAdds([]); // 已入包，暂存被后端清除
-      await api.updatePackage(detail.id, metaToInput({ ...form, title }));
+      const fresh = await api.updatePackage(detail.id, metaToInput({ ...form, title }));
       push("success", "已保存");
-      onSaved(null);
+      onSaved(fresh);
     } catch (err) {
       push("error", err instanceof Error ? err.message : "保存失败（部分改动可能已生效，请重试）");
       discardPending(); // 未入包的暂存立即废弃，避免残留
