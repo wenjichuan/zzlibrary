@@ -60,3 +60,41 @@ export function parsePartialDate(value: unknown): string | null {
   }
   return canonicalDateStr(year, month, day);
 }
+
+// ---------- 显示文本侧 API（API 出参 → 端上展示；各端共用，勿再手写解析） ----------
+
+/** 显示日期（"-0221-05-01" / "0630-01-01"）→ 整年（负 = 公元前）。 */
+export function yearOfDisplay(d: string): number {
+  const neg = d.startsWith("-");
+  const y = Number(neg ? d.slice(1, 5) : d.slice(0, 4));
+  return neg ? -y : y;
+}
+
+/** 年 → 「前221」/「221」展示。 */
+export function yearLabelOf(y: number): string {
+  return y < 0 ? `前${-y}` : String(y);
+}
+
+/** 显示日期 → "MM-DD" 部分（负年多一位符号）。 */
+export function restOfDisplay(d: string): string {
+  return d.startsWith("-") ? d.slice(6) : d.slice(5);
+}
+
+/** 显示日期 → UTC 毫秒。setUTCFullYear 规避 Date.UTC 把 0~99 年映射到 1900+ 的陷阱。 */
+export function displayToUtc(d: string): number {
+  const neg = d.startsWith("-");
+  const body = neg ? d.slice(1) : d;
+  const [y, m, day] = body.split("-").map(Number);
+  const dt = new Date(Date.UTC(2000, (m || 1) - 1, day || 1));
+  dt.setUTCFullYear(neg ? -(y || 1) : y || 1);
+  return dt.getTime();
+}
+
+/** 展示用日期：公元前「前221」；年份粒度只显年；月粒度「前221-05」。 */
+export function prettyDisplayDate(d: string | null): string {
+  if (!d) return "未注明时间";
+  const yText = yearLabelOf(yearOfDisplay(d));
+  const rest = restOfDisplay(d);
+  if (rest === "01-01") return yText;
+  return rest.endsWith("-01") ? `${yText}-${rest.slice(0, 2)}` : `${yText}-${rest}`;
+}

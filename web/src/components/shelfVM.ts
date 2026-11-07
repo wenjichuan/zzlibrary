@@ -1,6 +1,8 @@
 /** 书架视图模型与共享纯函数（无 React）：VM 构建、日期换算、展示格式。
  *
- * 轴系：X=时间、Y=二级分类、Z=三级分类；数量由书脊直接体现。 */
+ * 轴系：X=时间、Y=二级分类、Z=三级分类；数量由书脊直接体现。
+ * 日期域函数（公元前显示/逆解析）全部转发 core——本文件只保留视图模型与排序。 */
+import { displayToUtc, prettyDisplayDate, restOfDisplay, yearLabelOf, yearOfDisplay } from "@zzlibrary/core";
 import type { ShelfPackage, ShelfSegment, ShelvesDetail } from "@zzlibrary/shared/client";
 
 /* ---------- 视图模型 ---------- */
@@ -89,17 +91,13 @@ export function placeholderColor(id: number): string {
   return `hsl(${hue.toFixed(0)}, 34%, 44%)`;
 }
 
-/** 显示日期（"-0221-05-01" / "0630-01-01"）→ 年整数（负 = 公元前）。 */
-export function yearNum(d: string): number {
-  const neg = d.startsWith("-");
-  const y = Number(neg ? d.slice(1, 5) : d.slice(0, 4));
-  return neg ? -y : y;
-}
+/** 显示日期 → 年整数（负 = 公元前）。转发 core（域规则唯一出处）。 */
+export const yearNum = yearOfDisplay;
 
-export const yearLabel = (y: number) => (y < 0 ? `前${-y}` : String(y));
+export const yearLabel = yearLabelOf;
 
-/** 同年内取 "MM-DD" 部分（负年多一位符号）。 */
-const restOf = (d: string) => (d.startsWith("-") ? d.slice(6) : d.slice(5));
+/** 同年内取 "MM-DD" 部分（负年多一位符号）。转发 core。 */
+const restOf = restOfDisplay;
 
 /** 资料包排序：年 → 月日 → 包名（同日按包名拼音）。 */
 export function cmpByDate(a: ShelfPackage, b: ShelfPackage): number {
@@ -115,23 +113,10 @@ export function cmpByDate(a: ShelfPackage, b: ShelfPackage): number {
   return a.title.localeCompare(b.title, "zh");
 }
 
-/** 显示日期 → UTC 毫秒。setUTCFullYear 规避 Date.UTC 把 0~99 年映射到 1900+ 的陷阱。 */
-export function toUtc(s: string): number {
-  const neg = s.startsWith("-");
-  const body = neg ? s.slice(1) : s;
-  const [y, m, d] = body.split("-").map(Number);
-  const dt = new Date(Date.UTC(2000, (m || 1) - 1, d || 1));
-  dt.setUTCFullYear(neg ? -(y || 1) : y || 1);
-  return dt.getTime();
-}
+/** 显示日期 → UTC 毫秒。转发 core。 */
+export const toUtc = displayToUtc;
 
 export const yearOf = (ms: number) => new Date(ms).getUTCFullYear();
 
-/** 展示用日期：公元前渲染为「前221」；年份粒度只显示年份。 */
-export function prettyDate(d: string | null): string {
-  if (!d) return "未注明时间";
-  const yText = yearLabel(yearNum(d));
-  const rest = d.startsWith("-") ? d.slice(6) : d.slice(5); // "05-01"（负年多一位符号）
-  if (rest === "01-01") return yText;
-  return rest.endsWith("-01") ? `${yText}-${rest.slice(0, 2)}` : `${yText}-${rest}`;
-}
+/** 展示用日期。转发 core。 */
+export const prettyDate = prettyDisplayDate;
