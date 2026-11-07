@@ -21,6 +21,7 @@ import { createFsStore } from "@zzlibrary/core/node";
 import type { Settings } from "./config";
 import { SqliteSyncDevice } from "./sync-device";
 import { nowSqlite } from "./db";
+import { sha256Sync } from "./hashing";
 
 export interface CloudConfig {
   provider: "fs" | "webdav" | "s3";
@@ -42,10 +43,6 @@ export interface SyncStatus {
   revision: number;
   pendingHashFiles: number;
   running: boolean;
-}
-
-function sha256Node(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 /** 流式文件哈希：GB 级文件按块读取，不再整读进内存。 */
@@ -293,7 +290,7 @@ export class SyncService {
     const bytes = await remote.getBytes(blobPath(f.sha256));
     if (bytes === null) throw new Error("云端没有该文件的副本（可能尚未上传完成）");
     // 校验内容寻址
-    if (sha256Node(bytes) !== f.sha256) throw new Error("云端副本校验失败");
+    if (sha256Sync(bytes) !== f.sha256) throw new Error("云端副本校验失败");
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, bytes);
     this.db.prepare("UPDATE files SET local = 1 WHERE id = ?").run(fileId);
@@ -314,7 +311,7 @@ export class SyncService {
     if (config === null) return null;
     const remote = this.createStore(config);
     const bytes = await remote.getBytes(blobPath(row.cover_sha256));
-    if (bytes === null || sha256Node(bytes) !== row.cover_sha256) return null;
+    if (bytes === null || sha256Sync(bytes) !== row.cover_sha256) return null;
     mkdirSync(join(this.settings.artDir, "covers"), { recursive: true });
     writeFileSync(coverPath, bytes);
     return coverPath;

@@ -25,13 +25,14 @@ import {
   type PackagePathData,
   type ProgressData,
   type SegmentConfigData,
+  sanitizeName,
 } from "@zzlibrary/core";
 import type { DatabaseSync } from "node:sqlite";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { Settings } from "./config";
 import { isoFromSqlite, newUuid, nowSqlite } from "./db";
-import { recomputePackageStatus, syncCounts } from "./repo";
+import { parseJsonArray, recomputePackageStatus, syncCounts } from "./repo";
 import { pstmt } from "./db";
 
 interface FileRowFull {
@@ -234,10 +235,10 @@ export class SqliteSyncDevice implements LocalDevice {
       await put(
         envelope("packages", r.uuid, this.iso(r.updated_at) ?? "", {
           title: r.title,
-          authors: parseList(r.authors),
+          authors: parseJsonArray(r.authors),
           publishDate: r.publish_date,
           publisher: r.publisher,
-          tags: parseList(r.tags),
+          tags: parseJsonArray(r.tags),
           notes: r.notes,
           coverSha256: r.cover_sha256,
           palette,
@@ -535,10 +536,10 @@ export class SqliteSyncDevice implements LocalDevice {
     if (outcome !== "applied") return outcome;
     const localData: Record<string, unknown> = {
       title: row.title,
-      authors: parseList(row.authors),
+      authors: parseJsonArray(row.authors),
       publishDate: row.publish_date,
       publisher: row.publisher,
-      tags: parseList(row.tags),
+      tags: parseJsonArray(row.tags),
       notes: row.notes,
       coverSha256: row.cover_sha256,
       palette: row.palette === null ? null : JSON.parse(row.palette || "null"),
@@ -619,7 +620,7 @@ export class SqliteSyncDevice implements LocalDevice {
       const pkg = this.db
         .prepare("SELECT id, title, created_at FROM packages WHERE id = ?")
         .get(pkgId) as { id: number; title: string; created_at: string };
-      const dirName = `${String(pkg.created_at).slice(0, 10) || "unknown"}_${pkgId}_${sanitizeDir(pkg.title)}`;
+      const dirName = `${String(pkg.created_at).slice(0, 10) || "unknown"}_${pkgId}_${sanitizeName(pkg.title, 40, "file")}`;
       const relPath = join("files", dirName, `pending_${env.uuid.slice(0, 8)}_${data.name}`);
       const ins = this.db
         .prepare(
@@ -747,22 +748,6 @@ export class SqliteSyncDevice implements LocalDevice {
       .prepare("INSERT OR REPLACE INTO sync_baselines (path, env) VALUES (?, ?)")
       .run(path, manifestText(env));
   }
-}
-
-function parseList(text: string): string[] {
-  try {
-    const v = JSON.parse(text);
-    return Array.isArray(v) ? v.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-function sanitizeDir(title: string): string {
-  let n = title;
-  for (const ch of ["\\", "/", ":", "?", "*", '"', "<", ">", "|"]) n = n.split(ch).join("_");
-  n = n.replace(/[\x00-\x1f]/g, "").replace(/^[. ]+|[. ]+$/g, "");
-  return n.slice(0, 40) || "file";
 }
 
 function segmentKey(scope: "global" | "l2" | "l3", scopeUuid: string | null): string {

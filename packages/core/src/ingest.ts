@@ -41,8 +41,16 @@ export function stemTitle(filename: string): string {
   return stem.replace(/_+/g, " ") || base;
 }
 
-/** 包目录名清洗（入库目录 {日期}_{id}_{包名} 用）：非法字符替换、去首尾点空格、截断 40 字符。 */
+/** 名称清洗（文件名/包目录名/同步目录名共用的唯一实现）：Windows 非法字符替换、控制字符删除、去首尾点空格、截断、空回退。 */
+export function sanitizeName(name: string, maxLength = 40, fallback = "未命名"): string {
+  const cleaned = name
+    .replace(/[/\:*?"<>|]/g, "_")
+    .replace(/[\x00-\x1f]/g, "")
+    .replace(/^[. ]+|[. ]+$/g, "");
+  return cleaned.slice(0, maxLength) || fallback;
+}
+
+/** 包目录名清洗（入库目录 {日期}_{id}_{包名} 用）：40 字符、空回退「未命名」。 */
 export function cleanPackageName(name: string): string {
-  const cleaned = name.replace(/[\/:*?"<>|\x00-\x1f]/g, "_").replace(/^[. ]+|[. ]+$/g, "");
-  return cleaned.slice(0, 40) || "未命名";
+  return sanitizeName(name, 40, "未命名");
 }

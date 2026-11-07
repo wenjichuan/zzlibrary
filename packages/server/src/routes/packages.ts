@@ -13,10 +13,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { detectFormat, displayDate, mediaTypeOf, parsePartialDate } from "@zzlibrary/core";
+import { detectFormat, displayDate, mediaTypeOf, parsePartialDate, sanitizeName, stemTitle } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { resolvePaths } from "../deps";
 import {
@@ -34,32 +34,17 @@ import {
   type PackageRow,
 } from "../repo";
 import { inTransaction, nowSqlite } from "../db";
+import { sha256Sync } from "../hashing";
 import { extractMeta } from "../extract";
 import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
 import { recordPackageTombstones, recordTombstone } from "../sync-device";
 
-function sha256Of(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 export const packagesRouter = new Hono<Env>();
-
-export function sanitizeFilename(name: string): string {
-  let n = name;
-  for (const ch of ["\\", "/", ":", "?", "*", '"', "<", ">", "|"]) n = n.split(ch).join("_");
-  n = n.replace(/[\x00-\x1f]/g, "").replace(/^[. ]+|[. ]+$/g, "");
-  return n.slice(0, 120) || "file";
-}
-
-function stemOf(filename: string): string {
-  const dot = filename.lastIndexOf(".");
-  return dot > 0 ? filename.slice(0, dot) : filename;
-}
 
 /** 包目录名：{入库日期}_{包id}_{包名快照}——资源管理器离库可读；id 保证唯一。 */
 function packageDirName(pkgId: number, title: string, createdAt: string): string {
   const datePart = createdAt ? createdAt.slice(0, 10) : "unknown";
-  return `${datePart}_${pkgId}_${sanitizeFilename(title).slice(0, 40)}`;
+  return `${datePart}_${pkgId}_${sanitizeName(title, 40, "file")}`;
 }
 
 function packageDir(settings: Env["Variables"]["settings"], pkg: PackageFull): string {
@@ -136,7 +121,7 @@ function runStage(
   writeFileSync(
     join(stagingDir, "meta.json"),
     JSON.stringify({
-      filename: sanitizeFilename(filename),
+      filename: sanitizeName(filename, 120, "file"),
       format: fmt,
       size,
       page_count: meta.page_count,
@@ -164,7 +149,7 @@ packagesRouter.post("/api/packages/stage", async (c) => {
     size: result.size,
     format: result.format,
     meta: {
-      title: result.meta.title ?? sanitizeFilename(stemOf(result.filename)),
+      title: result.meta.title ?? stemTitle(result.filename),
       authors: result.meta.authors,
       publish_date: displayDate(result.meta.publish_date),
       publisher: result.meta.publisher,
@@ -274,7 +259,7 @@ packagesRouter.post("/api/packages", async (c) => {
         .prepare(
           "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
         )
-        .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
+        .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, sha256Sync(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
       const fileId = Number(f.lastInsertRowid);
       const dest = join(pkgDir, `${fileId}_${info.filename}`);
       renameSync(join(dir, "file"), dest);
@@ -299,7 +284,7 @@ packagesRouter.post("/api/packages", async (c) => {
   const palette = await paletteFromCover(packageCover, title);
   db.prepare("UPDATE packages SET palette = ?, cover_sha256 = ? WHERE id = ?").run(
     JSON.stringify(palette),
-    packageCover === null ? null : sha256Of(new Uint8Array(packageCover)),
+    packageCover === null ? null : sha256Sync(new Uint8Array(packageCover)),
     pkgId,
   );
   for (const { dir } of staged) rmSync(dir, { recursive: true, force: true });
@@ -525,7 +510,7 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
       .prepare(
         "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
       )
-      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
+      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, sha256Sync(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
     const fileId = Number(ins.lastInsertRowid);
     const dir = packageDir(settings, pkg);
     mkdirSync(dir, { recursive: true });
@@ -553,7 +538,7 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
     await regeneratePackageArt(settings.artDir, pkgId, pkg.row.title, coverImg);
     const palette = await paletteFromCover(coverImg, pkg.row.title);
     db.prepare("UPDATE packages SET palette = ?, cover_sha256 = ? WHERE id = ?").run(
-      JSON.stringify(palette), sha256Of(new Uint8Array(coverImg)), pkgId,
+      JSON.stringify(palette), sha256Sync(new Uint8Array(coverImg)), pkgId,
     );
   }
   rmSync(stagingDir, { recursive: true, force: true });
@@ -586,7 +571,7 @@ packagesRouter.patch("/api/packages/:id/files/:fileId", async (c) => {
   const params: Array<string | number> = [];
   if (payload.name !== undefined && payload.name !== null) {
     sets.push("name = ?");
-    params.push(sanitizeFilename(payload.name));
+    params.push(sanitizeName(payload.name, 120, "file"));
   }
   if (payload.sort_order !== undefined && payload.sort_order !== null) {
     sets.push("sort_order = ?");
@@ -693,7 +678,7 @@ packagesRouter.put("/api/packages/:id/cover", async (c) => {
   if (existsSync(spinePath)) unlinkSync(spinePath); // 书脊按新封面重生成
   const palette = await paletteFromCover(normalized, pkg.row.title);
   db.prepare("UPDATE packages SET cover_sha256 = ?, palette = ? WHERE id = ?").run(
-    sha256Of(new Uint8Array(normalized)),
+    sha256Sync(new Uint8Array(normalized)),
     JSON.stringify(palette),
     pkgId,
   );

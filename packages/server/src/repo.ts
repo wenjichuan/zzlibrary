@@ -91,7 +91,7 @@ export function getPackageOr404(db: DatabaseSync, packageId: number): PackageFul
   return pkg;
 }
 
-function parseJsonArray(text: string): string[] {
+export function parseJsonArray(text: string): string[] {
   try {
     const v = JSON.parse(text);
     return Array.isArray(v) ? v.map(String) : [];
