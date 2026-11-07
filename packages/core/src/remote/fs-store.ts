@@ -1,6 +1,6 @@
 /** 本地目录实现的远端存储（node:fs）：全量本地测试与桌面端单机模拟用。
  * 目录结构即云端结构（library.json / db/ / blobs/）。 */
-import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SyncTransportError, type RemoteStore } from "./store";
 
@@ -36,6 +36,24 @@ export function createFsStore(rootDir: string): RemoteStore {
         return new Uint8Array(readFileSync(abs(path)));
       } catch {
         return null;
+      }
+    },
+    async getBytesRange(path, start, end) {
+      const fd = openSync(abs(path), "r");
+      try {
+        const len = end - start + 1;
+        const buf = Buffer.alloc(len);
+        let read = 0;
+        while (read < len) {
+          const n = readSync(fd, buf, read, len - read, start + read);
+          if (n <= 0) break;
+          read += n;
+        }
+        return new Uint8Array(buf.subarray(0, read));
+      } catch {
+        return null;
+      } finally {
+        closeSync(fd);
       }
     },
     async putBytes(path, bytes) {

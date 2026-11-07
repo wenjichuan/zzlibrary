@@ -38,6 +38,8 @@ export class Settings {
   /** 允许携带凭证的跨域来源（Expo 开发等），逗号分隔 */
   readonly corsOrigins: string;
   readonly port: number;
+  /** 流式代理阈值：本地无字节且大于该值且云端支持区间读 → 前缀增长流式伺服；否则整文件取回 */
+  readonly smallFetchThreshold: number;
 
   constructor() {
     this.dataDir = env("DATA_DIR") ?? join(REPO_ROOT, "data");
@@ -47,6 +49,7 @@ export class Settings {
     this.sessionMaxAge = env("SESSION_MAX_AGE") ? Number(env("SESSION_MAX_AGE")) : 30 * 24 * 3600;
     this.corsOrigins = env("CORS_ORIGINS") ?? "";
     this.port = env("PORT") ? Number(env("PORT")) : Number(process.env.PORT ?? 8000);
+    this.smallFetchThreshold = env("SMALL_FETCH") ? Number(env("SMALL_FETCH")) : 8 * 1024 * 1024;
   }
 
   get dbPath(): string {

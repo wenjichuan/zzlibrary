@@ -30,6 +30,11 @@ export function createS3Store(opts: S3Options): RemoteStore {
       typeof init.body === "string"
         ? new TextEncoder().encode(init.body)
         : (init.body ?? undefined);
+    // 额外头（如 range）并入签名——S3 要求签名与实际请求头一致
+    const extraHeaders: Record<string, string> = {};
+    if (init.headers instanceof Headers) {
+      for (const [k, v] of init.headers.entries()) extraHeaders[k] = v;
+    }
     const signed = await signAwsV4({
       method: init.method,
       url: fullUrl,
@@ -38,9 +43,11 @@ export function createS3Store(opts: S3Options): RemoteStore {
       accessKeyId: opts.accessKeyId,
       secretAccessKey: opts.secretAccessKey,
       body,
+      extraHeaders,
     });
     const headers = new Headers();
     for (const [k, v] of Object.entries(signed)) headers.set(k, v);
+    for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v);
     try {
       return await fetch(fullUrl, { method: init.method, headers, body });
     } catch (err) {
@@ -76,6 +83,16 @@ export function createS3Store(opts: S3Options): RemoteStore {
       if (res.status === 404) return null;
       if (res.status >= 400) throw new SyncTransportError("GET 失败", path, res.status);
       return new Uint8Array(await res.arrayBuffer());
+    },
+    async getBytesRange(path, start, end) {
+      const res = await request(path, { method: "GET", headers: { range: `bytes=${start}-${end}` } });
+      if (res.status === 404) return null;
+      if (res.status !== 206) {
+        await res.body?.cancel().catch(() => undefined);
+        return null; // 不支持区间读 → 调用方回退整取
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return bytes.length > end - start + 1 ? bytes.subarray(0, end - start + 1) : bytes;
     },
     async putBytes(path, bytes) {
       // DOM 与 undici 两套 BodyInit 对 Uint8Array 泛型参数要求不一致（TS5.7+）；运行时两平台都接受任意 Uint8Array

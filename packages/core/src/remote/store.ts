@@ -13,6 +13,8 @@ export interface RemoteStore {
   getText(path: string): Promise<string | null>;
   putText(path: string, text: string): Promise<void>;
   getBytes(path: string): Promise<Uint8Array | null>;
+  /** 按字节区间读取（闭区间 [start, end]；流式代理/前缀取回用）；null = 该远端不支持区间读，调用方回退整取 */
+  getBytesRange?(path: string, start: number, end: number): Promise<Uint8Array | null>;
   putBytes(path: string, bytes: Uint8Array): Promise<void>;
   head(path: string): Promise<boolean>;
   remove?(path: string): Promise<void>;

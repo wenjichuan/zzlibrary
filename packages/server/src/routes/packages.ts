@@ -36,6 +36,7 @@ import {
 } from "../repo";
 import { inTransaction, nowSqlite, pstmt } from "../db";
 import { sha256Sync } from "../hashing";
+import { SMALL_FILE_THRESHOLD, parseRangeHeader, serveProxiedRange } from "../streaming";
 import { extractMeta } from "../extract";
 import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
 import { recordPackageTombstones, recordTombstone } from "../sync-device";
@@ -844,22 +845,51 @@ packagesRouter.get("/api/files/:fileId/cover", (c) => {
 packagesRouter.get("/api/files/:fileId/file", async (c) => {
   const settings = c.get("settings");
   const sync = c.get("sync");
+  const db = c.get("db");
   const fileId = Number(c.req.param("fileId"));
-  const f = c.get("db").prepare("SELECT * FROM files WHERE id = ?").get(fileId) as
+  const f = db.prepare("SELECT * FROM files WHERE id = ?").get(fileId) as
     | FileRow
     | undefined;
   if (!f) throw new HTTPException(404, { message: "文件不存在" });
-  let path = join(settings.dataDir, f.file_path);
-  if (!existsSync(path)) {
-    // 透明取回：本地已释放 → 云端拉回缓存再伺服
+  const realPath = join(settings.dataDir, f.file_path);
+  if (existsSync(realPath)) {
+    return serveWithRange(c, realPath, mediaTypeOf(f.format));
+  }
+  // 本地无字节（已释放/新机恢复）：小文件或云端不支持区间读 → 整文件透明取回
+  if (f.sha256 === null) throw new HTTPException(404, { message: "文件缺失（从未同步，云端没有副本）" });
+  const rangeable = f.file_size > SMALL_FILE_THRESHOLD && sync.supportsRangeFetch();
+  if (!rangeable) {
     try {
-      path = await sync.ensureFileLocal(fileId);
+      const path = await sync.ensureFileLocal(fileId);
+      return serveWithRange(c, path, mediaTypeOf(f.format));
     } catch (err) {
       throw new HTTPException(404, { message: err instanceof Error ? err.message : "文件缺失" });
     }
   }
-  const mediaType = mediaTypeOf(f.format);
-  return serveWithRange(c, path, mediaType);
+  // 大文件流式代理：前缀内读盘 / 接续前缘边转发边落盘 / 越前缘纯代理
+  const range = parseRangeHeader(c.req.header("range"), f.file_size);
+  const start = range?.start ?? 0;
+  const end = range?.end ?? f.file_size - 1;
+  if (start > end) {
+    return c.body(null, 416, { "Content-Range": `bytes */${f.file_size}` });
+  }
+  return serveProxiedRange(
+    c,
+    {
+      fileId,
+      sha256: f.sha256,
+      realPath,
+      size: f.file_size,
+      fetchRange: (s, e) => sync.getBytesRange(f.sha256!, s, e),
+      onFinalize: async () => {
+        pstmt(db, "UPDATE files SET local = 1 WHERE id = ?").run(fileId);
+        pstmt(db, "INSERT OR IGNORE INTO sync_blob_cache (sha256) VALUES (?)").run(f.sha256);
+      },
+    },
+    start,
+    end,
+    range !== null,
+  );
 });
 
 function serveWithRange(c: Context<Env>, path: string, mediaType: string) {

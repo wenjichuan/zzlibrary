@@ -278,6 +278,26 @@ export class SyncService {
     return abs;
   }
 
+  /** 云端区间读（流式代理/前缀取回用）；不支持区间读或无云端时返回 null（调用方回退整取）。 */
+  async getBytesRange(hash: string, start: number, end: number): Promise<Uint8Array | null> {
+    const config = this.loadConfig();
+    if (config === null) return null;
+    const remote = this.createStore(config);
+    if (remote.getBytesRange === undefined) return null;
+    try {
+      return await remote.getBytesRange(blobPath(hash), start, end);
+    } catch {
+      return null;
+    }
+  }
+
+  /** 当前云端是否具备区间读能力（决定大文件能否走流式代理）。 */
+  supportsRangeFetch(): boolean {
+    const config = this.loadConfig();
+    if (config === null) return false;
+    return this.createStore(config).getBytesRange !== undefined;
+  }
+
   /** 真封面透明取回（包封面端点用）。返回本地路径或 null（无真封面）。 */
   async ensureCoverLocal(packageId: number): Promise<string | null> {
     const row = this.db

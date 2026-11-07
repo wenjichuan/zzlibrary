@@ -92,6 +92,17 @@ export function createWebDavStore(opts: WebDavOptions): RemoteStore {
       if (res.status >= 400) throw new SyncTransportError("GET 失败", path, res.status);
       return new Uint8Array(await res.arrayBuffer());
     },
+    async getBytesRange(path, start, end) {
+      const res = await request(path, { method: "GET", headers: { range: `bytes=${start}-${end}` } });
+      if (res.status === 404) return null;
+      if (res.status !== 206) {
+        // 服务器不支持/忽略 Range（200=回整文件）——按不支持处理，交调用方回退整取
+        await res.body?.cancel().catch(() => undefined);
+        return null;
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return bytes.length > end - start + 1 ? bytes.subarray(0, end - start + 1) : bytes;
+    },
     async putBytes(path, bytes) {
       await ensureDirs(path);
       // DOM 与 undici 两套 BodyInit 对 Uint8Array 泛型参数要求不一致（TS5.7+）；运行时两平台都接受任意 Uint8Array

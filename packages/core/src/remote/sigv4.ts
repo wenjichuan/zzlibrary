@@ -35,6 +35,8 @@ export interface SigV4Input {
   secretAccessKey: string;
   /** 请求体（无则空） */
   body?: Uint8Array;
+  /** 参与签名的额外头（如 range——S3 要求请求头与签名一致；键会被小写化后按序并入） */
+  extraHeaders?: Record<string, string>;
 }
 
 export interface SigV4Headers {
@@ -60,9 +62,16 @@ export async function signAwsV4(input: SigV4Input): Promise<SigV4Headers> {
     .map((seg) => encodeURIComponent(decodeURIComponent(seg)))
     .join("/");
 
+  const extras = Object.entries(input.extraHeaders ?? {}).map(
+    ([k, v]) => [k.toLowerCase(), String(v).trim()] as const,
+  );
+  extras.sort(([a], [b]) => (a < b ? -1 : 1));
   const canonicalHeaders =
-    `host:${url.host}\n` + `x-amz-content-sha256:${payloadHash}\n` + `x-amz-date:${amzDate}\n`;
-  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+    `host:${url.host}\n` +
+    extras.map(([k, v]) => `${k}:${v}\n`).join("") +
+    `x-amz-content-sha256:${payloadHash}\n` +
+    `x-amz-date:${amzDate}\n`;
+  const signedHeaders = ["host", ...extras.map(([k]) => k), "x-amz-content-sha256", "x-amz-date"].join(";");
 
   const canonicalRequest = [
     input.method.toUpperCase(),
