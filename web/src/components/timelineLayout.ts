@@ -13,7 +13,7 @@
 - 书在段带内**按日期比例落位 + 最小间距前推 + 右侧留量封顶**（三合一保证整链恒在段内）：密则自然间距铺满，疏则拉开、与同期他层大致同列；书归网格序首个命中段（镜像后端 index_for 闭区间，日历桶右开），同层交叠段（明/清共用 1644）的 x 领域随归属切平、不相交。
 
 性能：建卷 O(书数 + 段数·log) 一次；滚动时布局零计算（浏览器原生滚动合成）。 */
-import type { ShelfPackage, ShelfSegment } from "@zzlibrary/shared";
+import type { ShelfPackage, ShelfSegment } from "@zzlibrary/shared/client";
 import { dayOf, toUtc, type FloorVM } from "./shelfVM";
 
 /* ---------- 常量 ---------- */

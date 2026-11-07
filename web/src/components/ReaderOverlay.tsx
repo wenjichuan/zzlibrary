@@ -3,8 +3,8 @@
  * 图片/音频/视频=原生（播放百分比）。进度节流写回 PUT /api/progress，关闭时冲刷。 */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatKind, isReadableFormat } from "@zzlibrary/core";
-import { api } from "@zzlibrary/shared";
-import type { FileDetail, Progress } from "@zzlibrary/shared";
+import { api } from "@zzlibrary/shared/client";
+import type { FileDetail, Progress } from "@zzlibrary/shared/client";
 
 const DOC_CSS = `<style>
 body{font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;

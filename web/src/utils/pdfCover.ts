@@ -1,6 +1,6 @@
 /** PDF 首页封面客户端渲染（入库即带封面 + 存量补齐共用）：
  * 无服务端原生依赖，CP2/CP3（WebView）天然复用同一套。 */
-import { api } from "@zzlibrary/shared";
+import { api } from "@zzlibrary/shared/client";
 
 export async function renderPdfCover(file: Blob | ArrayBuffer): Promise<Blob | null> {
   try {

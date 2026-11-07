@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "@zzlibrary/shared";
+import { api } from "@zzlibrary/shared/client";
 
 interface AuthState {
   username: string | null;

@@ -18,32 +18,11 @@ import {
   type RemoteStore,
 } from "@zzlibrary/core";
 import { createFsStore } from "@zzlibrary/core/node";
+import type { GcReport, SyncConfig, SyncStatus } from "@zzlibrary/shared";
 import type { Settings } from "./config";
 import { SqliteSyncDevice } from "./sync-device";
 import { nowSqlite } from "./db";
 import { sha256Sync } from "./hashing";
-
-export interface CloudConfig {
-  provider: "fs" | "webdav" | "s3";
-  autoSync: boolean;
-  fs?: { root: string };
-  webdav?: { baseUrl: string; username?: string; password?: string; rootPath?: string };
-  s3?: {
-    endpoint: string; region: string; bucket: string;
-    accessKeyId: string; secretAccessKey: string; prefix?: string;
-  };
-}
-
-export interface SyncStatus {
-  configured: boolean;
-  autoSync: boolean;
-  lastSyncAt: string | null;
-  lastError: string | null;
-  lastReport: FullSyncReport | null;
-  revision: number;
-  pendingHashFiles: number;
-  running: boolean;
-}
 
 /** 流式文件哈希：GB 级文件按块读取，不再整读进内存。 */
 function sha256File(abs: string): Promise<string> {
@@ -72,14 +51,14 @@ export class SyncService {
     return join(this.settings.dataDir, "cloud.json");
   }
 
-  private cfgCache: { mtimeMs: number; value: CloudConfig } | null = null;
+  private cfgCache: { mtimeMs: number; value: SyncConfig } | null = null;
 
-  loadConfig(): CloudConfig | null {
+  loadConfig(): SyncConfig | null {
     const p = this.configPath();
     try {
       const st = statSync(p); // 每次写操作都会读配置——按 mtime 缓存，省高频磁盘读
       if (this.cfgCache !== null && this.cfgCache.mtimeMs === st.mtimeMs) return this.cfgCache.value;
-      const value = JSON.parse(readFileSync(p, "utf-8")) as CloudConfig;
+      const value = JSON.parse(readFileSync(p, "utf-8")) as SyncConfig;
       this.cfgCache = { mtimeMs: st.mtimeMs, value };
       return value;
     } catch {
@@ -88,11 +67,11 @@ export class SyncService {
     }
   }
 
-  saveConfig(config: CloudConfig): void {
+  saveConfig(config: SyncConfig): void {
     writeFileSync(this.configPath(), JSON.stringify(config, null, 2), "utf-8");
   }
 
-  createStore(config: CloudConfig): RemoteStore {
+  createStore(config: SyncConfig): RemoteStore {
     if (config.provider === "fs") {
       if (!config.fs?.root) throw new Error("fs 云需要配置 root 目录");
       return createFsStore(config.fs.root);
@@ -442,10 +421,3 @@ export class SyncService {
   }
 }
 
-export interface GcReport {
-  tombstonesRemoved: number;
-  blobsRemoved: number;
-  blobBytesRemoved: number;
-  blobsSkippedReferenced: number;
-  errors: string[];
-}

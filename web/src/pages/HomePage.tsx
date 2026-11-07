@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type ShelvesOut, type Stats } from "@zzlibrary/shared";
+import { api, type ShelvesOut, type Stats } from "@zzlibrary/shared/client";
 import { Button, PageHeader, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 

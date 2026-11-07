@@ -1,7 +1,7 @@
 /** 书架视图模型与共享纯函数（无 React）：VM 构建、日期换算、展示格式。
  *
  * 轴系：X=时间、Y=二级分类、Z=三级分类；数量由书脊直接体现。 */
-import type { ShelfPackage, ShelfSegment, ShelvesDetail } from "@zzlibrary/shared";
+import type { ShelfPackage, ShelfSegment, ShelvesDetail } from "@zzlibrary/shared/client";
 
 /* ---------- 视图模型 ---------- */
 

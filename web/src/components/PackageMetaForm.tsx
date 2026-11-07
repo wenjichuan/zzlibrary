@@ -1,4 +1,4 @@
-import type { Package, PackageMetaInput } from "@zzlibrary/shared";
+import type { Package, PackageMetaInput } from "@zzlibrary/shared/client";
 import type { CategoryValue } from "./CategoryCascade";
 import ClassificationsEditor from "./ClassificationsEditor";
 import { Field, Input, Textarea } from "./ui";

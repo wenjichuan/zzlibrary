@@ -1,8 +1,8 @@
 /** 设置：同步与备份——云配置（fs/WebDAV/S3）、连接测试、立即同步、状态展示、
  * 自动同步开关。凭据只存服务端本地 data/cloud.json，永不上云。 */
 import { useCallback, useEffect, useState } from "react";
-import { api, formatBytes } from "@zzlibrary/shared";
-import type { SyncConfig, SyncStatus } from "@zzlibrary/shared";
+import { api, formatBytes } from "@zzlibrary/shared/client";
+import type { SyncConfig, SyncStatus } from "@zzlibrary/shared/client";
 import { Button, Input } from "../components/ui";
 import { useToast } from "../stores/toast";
 import { renderPdfCoverFromFile } from "../utils/pdfCover";

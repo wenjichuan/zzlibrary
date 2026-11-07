@@ -2,6 +2,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { HTTPException } from "hono/http-exception";
 import { computePackageStatus, displayDate } from "@zzlibrary/core";
+import type { FileDetail, Package, PackageDetail, Progress } from "@zzlibrary/shared";
 import { isoFromSqlite, pstmt } from "./db";
 import { getCategory, type CategoryRow } from "./deps";
 
@@ -100,33 +101,14 @@ export function parseJsonArray(text: string): string[] {
   }
 }
 
-export interface PackageOutJson {
-  id: number;
-  title: string;
-  authors: string[];
-  classifications: Array<{
-    l1: { id: number; name: string };
-    l2: { id: number; name: string } | null;
-    l3: { id: number; name: string } | null;
-  }>;
-  publish_date: string | null;
-  publisher: string | null;
-  tags: string[];
-  status: string;
-  file_count: number;
-  total_size: number;
-  notes: string | null;
-  created_at: string;
-}
-
-export function packageOut(db: DatabaseSync, pkg: PackageFull, catCache: Map<number, CategoryRow | null>): PackageOutJson {
+export function packageOut(db: DatabaseSync, pkg: PackageFull, catCache: Map<number, CategoryRow | null>): Package {
   const cat = (cid: number | null): CategoryRow | null => {
     if (cid === null) return null;
     if (!catCache.has(cid)) catCache.set(cid, getCategory(db, cid));
     return catCache.get(cid) ?? null;
   };
   const r = pkg.row;
-  const classifications: PackageOutJson["classifications"] = [];
+  const classifications: Package["classifications"] = [];
   for (const p of pkg.paths) {
     const l1c = cat(p.l1_id);
     if (l1c === null) continue; // 防御：悬挂路径（正常不会出现）
@@ -154,14 +136,7 @@ export function packageOut(db: DatabaseSync, pkg: PackageFull, catCache: Map<num
   };
 }
 
-export interface ProgressOutJson {
-  file_id: number;
-  locator: Record<string, unknown>;
-  percent: number;
-  updated_at: string;
-}
-
-export function progressOut(p: ProgressRow | null | undefined): ProgressOutJson | null {
+export function progressOut(p: ProgressRow | null | undefined): Progress | null {
   if (!p) return null;
   let locator: Record<string, unknown> = {};
   try {
@@ -182,19 +157,6 @@ export function getProgress(db: DatabaseSync, fileId: number): ProgressRow | nul
     | ProgressRow
     | undefined) ?? null;
 }
-
-export interface FileDetailJson {
-  id: number;
-  name: string;
-  format: string;
-  file_size: number;
-  page_count: number | null;
-  sort_order: number;
-  has_cover: boolean;
-  progress: ProgressOutJson | null;
-}
-
-export type PackageDetailJson = PackageOutJson & { files: FileDetailJson[] };
 
 /** 包状态重算（写事件时调用）：由包内可读文件进度聚合。 */
 export function recomputePackageStatus(db: DatabaseSync, packageId: number): void {

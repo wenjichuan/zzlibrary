@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type CustomRange, type SegmentConfig, type SegmentConfigBundle } from "@zzlibrary/shared";
+import { api, type CustomRange, type SegmentConfig, type SegmentConfigBundle } from "@zzlibrary/shared/client";
 import { Button, Input, PageHeader, Select, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";

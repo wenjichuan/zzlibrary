@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, formatBytes, type StagedFile } from "@zzlibrary/shared";
+import { api, formatBytes, type StagedFile } from "@zzlibrary/shared/client";
 import { FORMAT_ICONS } from "../components/FileRow";
 import PackageMetaForm, { emptyMeta, metaToInput, type MetaFormValue } from "../components/PackageMetaForm";
 import { Button, Input, PageHeader } from "../components/ui";

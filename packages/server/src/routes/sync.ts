@@ -2,13 +2,13 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env";
-import type { CloudConfig } from "../sync";
+import type { SyncConfig } from "@zzlibrary/shared";
 
 export const syncRouter = new Hono<Env>();
 
-function maskConfig(cfg: CloudConfig | null): unknown {
+function maskConfig(cfg: SyncConfig | null): unknown {
   if (cfg === null) return null;
-  const masked = structuredClone(cfg) as CloudConfig;
+  const masked = structuredClone(cfg) as SyncConfig;
   if (masked.webdav?.password) masked.webdav.password = "***";
   if (masked.s3?.secretAccessKey) masked.s3.secretAccessKey = "***";
   return masked;
@@ -20,7 +20,7 @@ syncRouter.get("/api/sync/config", (c) => {
 
 syncRouter.put("/api/sync/config", async (c) => {
   const svc = c.get("sync");
-  const body = await c.req.json<CloudConfig>().catch(() => ({}) as never);
+  const body = await c.req.json<SyncConfig>().catch(() => ({}) as never);
   if (body === null || typeof body !== "object" || !["fs", "webdav", "s3"].includes(body.provider ?? "")) {
     throw new HTTPException(422, { message: "provider 需为 fs / webdav / s3" });
   }
@@ -45,7 +45,7 @@ syncRouter.post("/api/sync/test", async (c) => {
   const svc = c.get("sync");
   let config = svc.loadConfig();
   if (config === null) {
-    const body = await c.req.json<CloudConfig>().catch(() => null);
+    const body = await c.req.json<SyncConfig>().catch(() => null);
     if (body === null) throw new HTTPException(422, { message: "尚未配置云端，请先保存配置" });
     config = body;
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CANONICAL_FORMATS } from "@zzlibrary/core";
-import { api, formatBytes, type FileDetail, type Package, type PackageDetail, type PackagePage } from "@zzlibrary/shared";
+import { api, formatBytes, type FileDetail, type Package, type PackageDetail, type PackagePage } from "@zzlibrary/shared/client";
 import PackageMetaForm, { metaFromPackage, metaToInput, type MetaFormValue } from "../components/PackageMetaForm";
 import { Button, Empty, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 import { flatten, useCategories } from "../stores/categories";

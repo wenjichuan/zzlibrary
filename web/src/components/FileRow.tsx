@@ -1,5 +1,5 @@
 import { isReadableFormat } from "@zzlibrary/core";
-import { api, formatBytes, type FileDetail } from "@zzlibrary/shared";
+import { api, formatBytes, type FileDetail } from "@zzlibrary/shared/client";
 
 /** 格式图标的唯一出处（各页共用，勿再另建副本） */
 export const FORMAT_ICONS: Record<string, string> = {

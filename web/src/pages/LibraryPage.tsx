@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, formatBytes, type FileDetail, type PackageDetail, type ShelvesDetail } from "@zzlibrary/shared";
+import { api, formatBytes, type FileDetail, type PackageDetail, type ShelvesDetail } from "@zzlibrary/shared/client";
 import { AisleView } from "../components/aisleView";
 import { TimelineView } from "../components/TimelineView";
 import ReaderOverlay from "../components/ReaderOverlay";

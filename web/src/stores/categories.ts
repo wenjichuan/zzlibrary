@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, type CategoryNode } from "@zzlibrary/shared";
+import { api, type CategoryNode } from "@zzlibrary/shared/client";
 
 interface CategoriesState {
   tree: CategoryNode[];

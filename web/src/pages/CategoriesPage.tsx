@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type CategoryNode } from "@zzlibrary/shared";
+import { api, type CategoryNode } from "@zzlibrary/shared/client";
 import { Button, Input, PageHeader, Spinner } from "../components/ui";
 import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";

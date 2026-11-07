@@ -6,7 +6,7 @@
 - 点左侧架签选段跳转（滚动定位）；书脊大小变化重建长卷；
 - 楼层纵向窗口化 + 横向按视口裁剪；空档窄条悬停示年跨。 */
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { api, type ShelfPackage, type ShelfSegment } from "@zzlibrary/shared";
+import { api, type ShelfPackage, type ShelfSegment } from "@zzlibrary/shared/client";
 import {
   SERIF,
   dayOf,
