@@ -31,19 +31,22 @@ import type { RemoteStore } from "../remote/store";
 // ---------- 本地设备接口 ----------
 
 export interface LocalManifest {
-  env: ManifestEnvelope;
-  /** 规范 JSON 文本（哈希与上传的字节） */
-  text: string;
+  /** null = 自上次构建未变化的复用条目（增量构建设备）；仅在 sha 变化需上传时才要求非空 */
+  env: ManifestEnvelope | null;
+  /** 规范 JSON 文本（哈希与上传的字节）；null = 未变化（引擎按需经 readManifestText 取回） */
+  text: string | null;
   /** 清单文本的 sha256（差分依据） */
   sha: string;
-  /** 本清单引用、需确保已上云的内容块（文件字节/封面图） */
+  /** 本清单引用、需确保已上云的内容块（文件字节/封面图）；复用条目为 []（不会触发上传） */
   blobSha256s: string[];
 }
 
 export interface LocalDevice {
   deviceId: string;
-  /** 全量本地实体 → 清单（每次同步快照差分，写路径零侵入、自愈） */
+  /** 全量本地实体 → 清单（设备可增量构建：未变化条目以 sha-only 复用表示） */
   buildManifests(): Promise<Map<string, LocalManifest>>;
+  /** 按路径取回清单文本（增量设备的复用条目按需取回）；无则 null */
+  readManifestText?(path: string): Promise<string | null>;
   /** 读内容块字节（按哈希找本地文件/封面）；无则 null */
   readBlob(sha256: string): Promise<Uint8Array | null>;
   /** 应用一份远端清单（合并判断可复用 merge.ts） */
@@ -222,9 +225,36 @@ export async function push(
   }
   const uploads = new Map<string, Upload>();
   for (const [path, m] of local) {
-    if (cachedPaths.get(path) !== m.sha) {
-      uploads.set(path, { path, env: m.env, text: m.text, sha: m.sha, blobs: m.blobSha256s, tombstone: m.env.deleted });
+    if (cachedPaths.get(path) === m.sha) continue;
+    // 增量设备的复用条目（sha 变化但本地未变：云端被他端推进而 pull 未及看到）——按需取回文本
+    let env = m.env;
+    let text = m.text;
+    let blobs = m.blobSha256s;
+    if (env === null || text === null) {
+      const cached = (await device.readManifestText?.(path)) ?? null;
+      if (cached === null) {
+        report.errors.push(`清单不可得（增量缓存缺失）：${path}`);
+        continue;
+      }
+      try {
+        env = JSON.parse(cached) as ManifestEnvelope;
+        text = cached;
+      } catch {
+        report.errors.push(`清单缓存解析失败：${path}`);
+        continue;
+      }
+      // 复用条目的 blobs 为空——从 env 重新派生（files=内容块，packages=真封面）
+      if (blobs.length === 0 && !env.deleted) {
+        if (env.kind === "files") {
+          const s = (env.data as { sha256?: unknown }).sha256;
+          if (typeof s === "string" && s) blobs = [s];
+        } else if (env.kind === "packages") {
+          const s = (env.data as { coverSha256?: unknown }).coverSha256;
+          if (typeof s === "string" && s) blobs = [s];
+        }
+      }
     }
+    uploads.set(path, { path, env, text, sha: m.sha, blobs, tombstone: env.deleted });
   }
   // 云端有而本地无 → 墓碑（删除传播；条目留在索引里防复活）。
   // 兜底网：设备正常情况下由 buildManifests 携带墓碑（含原 updatedAt，幂等）；

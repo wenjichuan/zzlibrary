@@ -33,7 +33,8 @@ import { join } from "node:path";
 import type { Settings } from "./config";
 import { isoFromSqlite, newUuid, nowSqlite } from "./db";
 import { parseJsonArray, recomputePackageStatus, syncCounts } from "./repo";
-import { pstmt } from "./db";
+import { inTransaction, pstmt } from "./db";
+import { sha256Sync } from "./hashing";
 
 interface FileRowFull {
   id: number;
@@ -183,171 +184,309 @@ export class SqliteSyncDevice implements LocalDevice {
     if (packageId !== null) this.dirtyPackages.add(packageId);
   }
 
-  // ---------- buildManifests ----------
+  // ---------- buildManifests（增量构建） ----------
+  // 变更戳 = 信封 updatedAt（iso 归一）。未变化实体复用 sync_manifest_build 里的 sha/text（text 不进内存，
+  // 引擎需要时经 readManifestText 取回）——万包规模下每次同步不再全量 stringify+哈希+驻留文本。
+
+  private stampOf(sqliteText: string | null | undefined): string {
+    return this.iso(sqliteText ?? "") ?? "";
+  }
 
   async buildManifests(): Promise<Map<string, LocalManifest>> {
     const out = new Map<string, LocalManifest>();
-    const put = async (env: ManifestEnvelope, blobs: string[]) => {
-      const text = manifestText(env);
-      out.set(manifestPath(env.kind, env.uuid), {
-        env, text, sha: await sha256Hex(text), blobSha256s: blobs,
-      });
-    };
 
-    const catRows = this.db
-      .prepare("SELECT * FROM categories ORDER BY id")
-      .all() as Array<{
-      id: number; uuid: string; level: number; parent_id: number | null; name: string;
-      sort_order: number; created_at: string; updated_at: string;
+    // 1) 轻量全扫：id↔uuid 映射 + 各集合变更戳（只取 uuid/updated_at，零 JSON/哈希）
+    const catLight = pstmt(this.db, "SELECT id, uuid, parent_id, updated_at FROM categories ORDER BY id").all() as Array<{
+      id: number; uuid: string; parent_id: number | null; updated_at: string;
     }>;
-    const catIdToUuid = new Map(catRows.map((r) => [r.id, r.uuid]));
-    for (const r of catRows) {
-      await put(
-        envelope("categories", r.uuid, this.iso(r.updated_at) ?? "", {
-          level: r.level,
-          parentUuid: r.parent_id === null ? null : (catIdToUuid.get(r.parent_id) ?? null),
-          name: r.name,
-          sortOrder: r.sort_order,
-          createdAt: this.iso(r.created_at) ?? "",
-        } satisfies CategoryData),
-        [],
-      );
-    }
-
-    const pkgRows = this.db
-      .prepare("SELECT id, uuid, title, authors, publish_date, publisher, tags, notes, cover_sha256, palette, created_at, updated_at FROM packages ORDER BY id")
-      .all() as Array<{
-      id: number; uuid: string; title: string; authors: string; publish_date: string | null;
-      publisher: string | null; tags: string; notes: string | null; cover_sha256: string | null;
-      palette: string | null; created_at: string; updated_at: string;
+    const catIdToUuid = new Map(catLight.map((r) => [r.id, r.uuid]));
+    const pkgLight = pstmt(this.db, "SELECT id, uuid, updated_at FROM packages ORDER BY id").all() as Array<{
+      id: number; uuid: string; updated_at: string;
     }>;
-    for (const r of pkgRows) {
+    for (const r of pkgLight) {
       this.pkgUuidToId.set(r.uuid, r.id);
       this.pkgIdToUuid.set(r.id, r.uuid);
-      let palette: PackageData["palette"] = null;
-      if (r.palette) {
-        try {
-          palette = JSON.parse(r.palette);
-        } catch {
-          palette = null;
-        }
-      }
-      await put(
-        envelope("packages", r.uuid, this.iso(r.updated_at) ?? "", {
-          title: r.title,
-          authors: parseJsonArray(r.authors),
-          publishDate: r.publish_date,
-          publisher: r.publisher,
-          tags: parseJsonArray(r.tags),
-          notes: r.notes,
-          coverSha256: r.cover_sha256,
-          palette,
-          createdAt: this.iso(r.created_at) ?? "",
-        } satisfies PackageData),
-        r.cover_sha256 !== null ? [r.cover_sha256] : [],
-      );
     }
 
-    for (const r of this.db
-      .prepare("SELECT * FROM package_paths ORDER BY id")
-      .all() as Array<{
-      uuid: string; package_id: number; l1_id: number; l2_id: number | null; l3_id: number | null; updated_at: string;
+    const stamps = new Map<string, string>(); // path → 变更戳（活实体；墓碑见下）
+    for (const r of catLight) stamps.set(manifestPath("categories", r.uuid), this.stampOf(r.updated_at));
+    for (const r of pkgLight) stamps.set(manifestPath("packages", r.uuid), this.stampOf(r.updated_at));
+    for (const r of pstmt(this.db, "SELECT uuid, updated_at FROM package_paths").all() as Array<{ uuid: string; updated_at: string }>) {
+      stamps.set(manifestPath("package-paths", r.uuid), this.stampOf(r.updated_at));
+    }
+    for (const r of pstmt(this.db, "SELECT uuid, updated_at FROM files WHERE sha256 IS NOT NULL").all() as Array<{ uuid: string; updated_at: string }>) {
+      stamps.set(manifestPath("files", r.uuid), this.stampOf(r.updated_at));
+    }
+    for (const r of pstmt(this.db, "SELECT f.uuid AS uuid, p.updated_at AS updated_at FROM reading_progress p JOIN files f ON f.id = p.file_id").all() as Array<{ uuid: string; updated_at: string }>) {
+      stamps.set(manifestPath("progress", r.uuid), this.stampOf(r.updated_at));
+    }
+    const segKeyToId = new Map<string, number>();
+    for (const r of pstmt(this.db, "SELECT id, scope, l2_id, l3_id, updated_at FROM segment_configs").all() as Array<{
+      id: number; scope: "global" | "l2" | "l3"; l2_id: number | null; l3_id: number | null; updated_at: string;
     }>) {
-      await put(
-        envelope("package-paths", r.uuid, this.iso(r.updated_at) ?? "", {
-          packageUuid: this.pkgIdToUuid.get(r.package_id) ?? "",
-          l1Uuid: catIdToUuid.get(r.l1_id) ?? "",
-          l2Uuid: r.l2_id === null ? null : (catIdToUuid.get(r.l2_id) ?? null),
-          l3Uuid: r.l3_id === null ? null : (catIdToUuid.get(r.l3_id) ?? null),
-        } satisfies PackagePathData),
-        [],
-      );
-    }
-
-    for (const r of this.db
-      .prepare("SELECT id, package_id, uuid, name, format, file_size, page_count, sort_order, sha256, updated_at FROM files ORDER BY package_id, sort_order, id")
-      .all() as Array<Omit<FileRowFull, "file_path" | "local">>) {
-      if (r.sha256 === null) continue; // 哈希未回填：暂不上云（回填后自动并入）
-      await put(
-        envelope("files", r.uuid, this.iso(r.updated_at) ?? "", {
-          packageUuid: this.pkgIdToUuid.get(r.package_id) ?? "",
-          name: r.name,
-          format: r.format,
-          sha256: r.sha256,
-          size: r.file_size,
-          pageCount: r.page_count,
-          sortOrder: r.sort_order,
-        } satisfies FileData),
-        [r.sha256],
-      );
-    }
-
-    for (const r of this.db
-      .prepare(
-        "SELECT p.locator, p.percent, p.updated_at, f.uuid AS file_uuid FROM reading_progress p JOIN files f ON f.id = p.file_id ORDER BY p.file_id",
-      )
-      .all() as Array<{ locator: string; percent: number; updated_at: string; file_uuid: string }>) {
-      let locator: Record<string, unknown> = {};
-      try {
-        locator = JSON.parse(r.locator) as Record<string, unknown>;
-      } catch {
-        locator = {};
-      }
-      await put(
-        envelope("progress", r.file_uuid, this.iso(r.updated_at) ?? "", {
-          locator,
-          percent: Number(r.percent),
-        } satisfies ProgressData),
-        [],
-      );
-    }
-
-    for (const r of this.db
-      .prepare("SELECT * FROM segment_configs ORDER BY id")
-      .all() as Array<{
-      id: number; scope: "global" | "l2" | "l3"; l2_id: number | null; l3_id: number | null;
-      mode: string; params: string; updated_at: string;
-    }>) {
-      let params: Record<string, unknown> = {};
-      try {
-        params = JSON.parse(r.params) as Record<string, unknown>;
-      } catch {
-        params = {};
-      }
       const scopeUuid = r.scope === "l2" && r.l2_id !== null
         ? (catIdToUuid.get(r.l2_id) ?? null)
         : r.scope === "l3" && r.l3_id !== null
           ? (catIdToUuid.get(r.l3_id) ?? null)
           : null;
-      await put(
-        envelope("segment-configs", segmentKey(r.scope, scopeUuid), this.iso(r.updated_at) ?? "", {
-          scope: r.scope,
-          scopeUuid,
-          mode: r.mode,
-          params,
-        } satisfies SegmentConfigData),
-        [],
-      );
+      const key = segmentKey(r.scope, scopeUuid);
+      segKeyToId.set(key, r.id);
+      stamps.set(manifestPath("segment-configs", key), this.stampOf(r.updated_at));
+    }
+    // 墓碑记忆。关键防御：本地有活实体的路径跳过——"删除→复活"场景的活清单不被残留墓碑覆盖。
+    for (const r of pstmt(this.db, "SELECT path, updated_at FROM sync_tombstones").all() as Array<{ path: string; updated_at: string }>) {
+      if (stamps.has(r.path)) continue; // 本地有活实体 → 墓碑作废
+      stamps.set(r.path, this.stampOf(r.updated_at));
     }
 
-    // 墓碑记忆（含本地硬删除的实体）。
-    // 关键防御：本地有活实体的路径跳过——否则"删除→复活"场景（远端复活清单已应用/
-    // 数据被恢复）的活清单会被残留墓碑覆盖，复活永远推不上云、甚至被再推回墓碑。
-    for (const r of this.db
-      .prepare("SELECT path, updated_at, blob_refs FROM sync_tombstones")
-      .all() as Array<{ path: string; updated_at: string; blob_refs: string | null }>) {
+    // 2) 增量缓存比对：未变化复用 sha；变化/缺失标记重建；缓存里已消失的实体标记清除
+    const cache = new Map(
+      (pstmt(this.db, "SELECT path, sha, stamp FROM sync_manifest_build").all() as Array<{
+        path: string; sha: string; stamp: string;
+      }>).map((r) => [r.path, r]),
+    );
+    const dirty = new Set<string>();
+    for (const [path, stamp] of stamps) {
+      const c = cache.get(path);
+      if (c !== undefined && c.stamp === stamp) {
+        out.set(path, { env: null, text: null, sha: c.sha, blobSha256s: [] });
+      } else {
+        dirty.add(path);
+      }
+    }
+    const stale = [...cache.keys()].filter((p) => !stamps.has(p));
+
+    // 3) 重建变化实体（同步构建 + 分批落缓存；每 2000 条让出事件循环）
+    const pending: Array<[string, string, string, string]> = []; // path, sha, text, stamp
+    const flush = () => {
+      if (pending.length === 0) return;
+      inTransaction(this.db, () => {
+        const ins = pstmt(this.db, "INSERT OR REPLACE INTO sync_manifest_build (path, sha, text, stamp) VALUES (?, ?, ?, ?)");
+        for (const row of pending) ins.run(...row);
+      });
+      pending.length = 0;
+    };
+    const encoder = new TextEncoder();
+    const rebuild = (env: ManifestEnvelope, blobs: string[]) => {
+      const path = manifestPath(env.kind, env.uuid);
+      const text = manifestText(env);
+      out.set(path, { env, text, sha: sha256Sync(encoder.encode(text)), blobSha256s: blobs });
+      pending.push([path, out.get(path)!.sha, text, env.updatedAt]);
+    };
+
+    const dirtyByKind = new Map<string, string[]>();
+    for (const path of dirty) {
+      const parsed = parseManifestPath(path);
+      if (parsed === null) continue;
+      const arr = dirtyByKind.get(parsed.kind) ?? [];
+      arr.push(parsed.uuid);
+      dirtyByKind.set(parsed.kind, arr);
+    }
+    const chunks = <T,>(xs: T[], n = 500): T[][] => {
+      const outC: T[][] = [];
+      for (let i = 0; i < xs.length; i += n) outC.push(xs.slice(i, i + n));
+      return outC;
+    };
+    let processed = 0;
+    const maybeYield = async () => {
+      processed += 1;
+      if (processed % 2000 === 0) {
+        flush();
+        await new Promise<void>((r) => setImmediate(r));
+      }
+    };
+
+    const dirtyCats = new Set(dirtyByKind.get("categories") ?? []);
+    if (dirtyCats.size > 0) {
+      for (const chunk of chunks([...dirtyCats])) {
+        const ph = chunk.map(() => "?").join(",");
+        const rows = pstmt(this.db, `SELECT * FROM categories WHERE uuid IN (${ph}) ORDER BY id`).all(...chunk) as Array<{
+          id: number; uuid: string; level: number; parent_id: number | null; name: string;
+          sort_order: number; created_at: string; updated_at: string;
+        }>;
+        for (const r of rows) {
+          rebuild(
+            envelope("categories", r.uuid, this.stampOf(r.updated_at), {
+              level: r.level,
+              parentUuid: r.parent_id === null ? null : (catIdToUuid.get(r.parent_id) ?? null),
+              name: r.name,
+              sortOrder: r.sort_order,
+              createdAt: this.iso(r.created_at) ?? "",
+            } satisfies CategoryData),
+            [],
+          );
+          await maybeYield();
+        }
+      }
+      flush();
+    }
+
+    const dirtyPkgs = new Set(dirtyByKind.get("packages") ?? []);
+    if (dirtyPkgs.size > 0) {
+      for (const chunk of chunks([...dirtyPkgs])) {
+        const ph = chunk.map(() => "?").join(",");
+        const rows = pstmt(this.db, "SELECT id, uuid, title, authors, publish_date, publisher, tags, notes, cover_sha256, palette, created_at, updated_at FROM packages WHERE uuid IN (" + ph + ") ORDER BY id").all(...chunk) as Array<{
+          id: number; uuid: string; title: string; authors: string; publish_date: string | null;
+          publisher: string | null; tags: string; notes: string | null; cover_sha256: string | null;
+          palette: string | null; created_at: string; updated_at: string;
+        }>;
+        for (const r of rows) {
+          let palette: PackageData["palette"] = null;
+          if (r.palette) {
+            try { palette = JSON.parse(r.palette); } catch { palette = null; }
+          }
+          rebuild(
+            envelope("packages", r.uuid, this.stampOf(r.updated_at), {
+              title: r.title,
+              authors: parseJsonArray(r.authors),
+              publishDate: r.publish_date,
+              publisher: r.publisher,
+              tags: parseJsonArray(r.tags),
+              notes: r.notes,
+              coverSha256: r.cover_sha256,
+              palette,
+              createdAt: this.iso(r.created_at) ?? "",
+            } satisfies PackageData),
+            r.cover_sha256 !== null ? [r.cover_sha256] : [],
+          );
+          await maybeYield();
+        }
+      }
+      flush();
+    }
+
+    const dirtyPaths = new Set(dirtyByKind.get("package-paths") ?? []);
+    if (dirtyPaths.size > 0) {
+      for (const chunk of chunks([...dirtyPaths])) {
+        const ph = chunk.map(() => "?").join(",");
+        const rows = pstmt(this.db, `SELECT * FROM package_paths WHERE uuid IN (${ph}) ORDER BY id`).all(...chunk) as Array<{
+          uuid: string; package_id: number; l1_id: number; l2_id: number | null; l3_id: number | null; updated_at: string;
+        }>;
+        for (const r of rows) {
+          rebuild(
+            envelope("package-paths", r.uuid, this.stampOf(r.updated_at), {
+              packageUuid: this.pkgIdToUuid.get(r.package_id) ?? "",
+              l1Uuid: catIdToUuid.get(r.l1_id) ?? "",
+              l2Uuid: r.l2_id === null ? null : (catIdToUuid.get(r.l2_id) ?? null),
+              l3Uuid: r.l3_id === null ? null : (catIdToUuid.get(r.l3_id) ?? null),
+            } satisfies PackagePathData),
+            [],
+          );
+          await maybeYield();
+        }
+      }
+      flush();
+    }
+
+    const dirtyFiles = new Set(dirtyByKind.get("files") ?? []);
+    if (dirtyFiles.size > 0) {
+      for (const chunk of chunks([...dirtyFiles])) {
+        const ph = chunk.map(() => "?").join(",");
+        const rows = pstmt(this.db, "SELECT id, package_id, uuid, name, format, file_size, page_count, sort_order, sha256, updated_at FROM files WHERE sha256 IS NOT NULL AND uuid IN (" + ph + ") ORDER BY package_id, sort_order, id").all(...chunk) as Array<Omit<FileRowFull, "file_path" | "local">>;
+        for (const r of rows) {
+          const sha = r.sha256 as string; // WHERE sha256 IS NOT NULL 已过滤
+          rebuild(
+            envelope("files", r.uuid, this.stampOf(r.updated_at), {
+              packageUuid: this.pkgIdToUuid.get(r.package_id) ?? "",
+              name: r.name,
+              format: r.format,
+              sha256: sha,
+              size: r.file_size,
+              pageCount: r.page_count,
+              sortOrder: r.sort_order,
+            } satisfies FileData),
+            [sha],
+          );
+          await maybeYield();
+        }
+      }
+      flush();
+    }
+
+    const dirtyProgress = new Set(dirtyByKind.get("progress") ?? []);
+    if (dirtyProgress.size > 0) {
+      for (const chunk of chunks([...dirtyProgress])) {
+        const ph = chunk.map(() => "?").join(",");
+        const rows = pstmt(this.db, "SELECT p.locator, p.percent, p.updated_at, f.uuid AS file_uuid FROM reading_progress p JOIN files f ON f.id = p.file_id WHERE f.uuid IN (" + ph + ") ORDER BY p.file_id").all(...chunk) as Array<{ locator: string; percent: number; updated_at: string; file_uuid: string }>;
+        for (const r of rows) {
+          let locator: Record<string, unknown> = {};
+          try { locator = JSON.parse(r.locator) as Record<string, unknown>; } catch { locator = {}; }
+          rebuild(
+            envelope("progress", r.file_uuid, this.stampOf(r.updated_at), {
+              locator,
+              percent: Number(r.percent),
+            } satisfies ProgressData),
+            [],
+          );
+          await maybeYield();
+        }
+      }
+      flush();
+    }
+
+    const dirtySegs = new Set(dirtyByKind.get("segment-configs") ?? []);
+    if (dirtySegs.size > 0) {
+      const ids = [...dirtySegs].map((k) => segKeyToId.get(k)).filter((v): v is number => v !== undefined);
+      for (const chunk of chunks(ids)) {
+        const ph = chunk.map(() => "?").join(",");
+        const rows = pstmt(this.db, `SELECT * FROM segment_configs WHERE id IN (${ph}) ORDER BY id`).all(...chunk) as Array<{
+          id: number; scope: "global" | "l2" | "l3"; l2_id: number | null; l3_id: number | null;
+          mode: string; params: string; updated_at: string;
+        }>;
+        for (const r of rows) {
+          let params: Record<string, unknown> = {};
+          try { params = JSON.parse(r.params) as Record<string, unknown>; } catch { params = {}; }
+          const scopeUuid = r.scope === "l2" && r.l2_id !== null
+            ? (catIdToUuid.get(r.l2_id) ?? null)
+            : r.scope === "l3" && r.l3_id !== null
+              ? (catIdToUuid.get(r.l3_id) ?? null)
+              : null;
+          rebuild(
+            envelope("segment-configs", segmentKey(r.scope, scopeUuid), this.stampOf(r.updated_at), {
+              scope: r.scope,
+              scopeUuid,
+              mode: r.mode,
+              params,
+            } satisfies SegmentConfigData),
+            [],
+          );
+          await maybeYield();
+        }
+      }
+      flush();
+    }
+
+    // 墓碑重建（仅变化的；未变化的已在缓存比对步复用）。携带内容块引用——云端即权威 GC 账本。
+    for (const r of pstmt(this.db, "SELECT path, updated_at, blob_refs FROM sync_tombstones").all() as Array<{ path: string; updated_at: string; blob_refs: string | null }>) {
       if (out.has(r.path)) continue; // 本地有活实体 → 墓碑作废
+      if (!dirty.has(r.path)) continue; // 未变化 → 已复用缓存
       const parsed = parseManifestPath(r.path);
       if (parsed === null) continue;
       let refs: unknown = undefined;
       if (r.blob_refs !== null) {
         try { refs = JSON.parse(r.blob_refs); } catch { refs = undefined; }
       }
-      // 墓碑携带内容块引用（删除记账随墓碑上云——云端即权威 GC 账本）
-      const env = envelope(parsed.kind, parsed.uuid, this.iso(r.updated_at) ?? nowIsoCompat(), { blobRefs: refs }, true);
-      await put(env, []);
+      const env = envelope(parsed.kind, parsed.uuid, this.stampOf(r.updated_at) || nowIsoCompat(), { blobRefs: refs }, true);
+      rebuild(env, []);
+      await maybeYield();
+    }
+    flush();
+
+    // 4) 清掉缓存里已消失实体的行
+    if (stale.length > 0) {
+      inTransaction(this.db, () => {
+        const del = pstmt(this.db, "DELETE FROM sync_manifest_build WHERE path = ?");
+        for (const p of stale) del.run(p);
+      });
     }
     return out;
+  }
+
+  async readManifestText(path: string): Promise<string | null> {
+    const row = pstmt(this.db, "SELECT text FROM sync_manifest_build WHERE path = ?").get(path) as
+      | { text: string }
+      | undefined;
+    return row?.text ?? null;
   }
 
 
@@ -700,16 +839,23 @@ export class SqliteSyncDevice implements LocalDevice {
     return m;
   }
   async setManifestCache(entries: Map<string, string>): Promise<void> {
-    this.db.exec("BEGIN");
-    try {
-      this.db.exec("DELETE FROM sync_manifest_cache");
-      const ins = pstmt(this.db, "INSERT INTO sync_manifest_cache (path, sha256) VALUES (?, ?)");
-      for (const [path, sha] of entries) ins.run(path, sha);
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
+    // 增量写：只动变化的行（旧「全删+全插」在万包规模=每次同步重写数十万行 WAL）
+    inTransaction(this.db, () => {
+      const existing = new Map(
+        (pstmt(this.db, "SELECT path, sha256 FROM sync_manifest_cache").all() as Array<{ path: string; sha256: string }>).map(
+          (r) => [r.path, r.sha256],
+        ),
+      );
+      const ins = pstmt(this.db, "INSERT OR REPLACE INTO sync_manifest_cache (path, sha256) VALUES (?, ?)");
+      const del = pstmt(this.db, "DELETE FROM sync_manifest_cache WHERE path = ?");
+      for (const [path, sha] of entries) {
+        if (existing.get(path) === sha) continue;
+        ins.run(path, sha);
+      }
+      for (const path of existing.keys()) {
+        if (!entries.has(path)) del.run(path);
+      }
+    });
   }
   async getCollectionHashes(): Promise<Partial<Record<Collection, string>>> {
     const row = pstmt(this.db, "SELECT value FROM sync_state WHERE key = 'col_hashes'").get() as

@@ -171,6 +171,12 @@ CREATE TABLE IF NOT EXISTS sync_tombstones (
   updated_at TEXT NOT NULL,
   blob_refs TEXT
 );
+CREATE TABLE IF NOT EXISTS sync_manifest_build (
+  path TEXT PRIMARY KEY,
+  sha TEXT NOT NULL,
+  text TEXT NOT NULL,
+  stamp TEXT NOT NULL
+);
 
 CREATE INDEX IF NOT EXISTS ix_files_sha256 ON files (sha256);
 `);
