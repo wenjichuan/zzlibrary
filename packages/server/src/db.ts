@@ -209,11 +209,14 @@ CREATE TRIGGER IF NOT EXISTS trg_packages_fts_au AFTER UPDATE OF title, authors,
   VALUES (new.id, new.title, new.authors, new.publisher, new.tags, new.notes);
 END;
 `);
-  // 索引过期（触发器上线前的存量/外部直写）→ 一次性重建（幂等；count 对得上则跳过）
-  const ftsCount = (db.prepare("SELECT COUNT(*) AS n FROM packages_fts").get() as { n: number }).n;
-  const pkgCount = (db.prepare("SELECT COUNT(*) AS n FROM packages").get() as { n: number }).n;
-  if (ftsCount !== pkgCount) {
+  // 存量索引一次性重建。守卫必须用持久旗标——外部内容 FTS 表的 COUNT(*) 报的是内容表行数，
+  // 空索引也会「对得上」，按计数判断永远不会触发重建（已实测踩坑）。
+  const flag = db.prepare("SELECT value FROM sync_state WHERE key = 'fts_v1_rebuilt'").get() as
+    | { value: string }
+    | undefined;
+  if (flag === undefined) {
     db.exec("INSERT INTO packages_fts(packages_fts) VALUES ('rebuild')");
+    db.prepare("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('fts_v1_rebuilt', '1')").run();
   }
 }
 
