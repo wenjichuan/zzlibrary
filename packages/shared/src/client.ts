@@ -117,6 +117,8 @@ export const api = {
 
   // shelves
   shelves: (l1: number) => request<ShelvesOut>(`/api/shelves${qs({ l1 })}`),
+  shelvesOverview: (l1: number) => request<ShelvesDetail>(`/api/shelves/${l1}/overview`),
+  shelfRack: (l1: number, l2: string) => request<ShelvesDetail>(`/api/shelves/${l1}/rack?l2=${encodeURIComponent(l2)}`),
   stats: () => request<Stats>("/api/stats"),
   shelvesDetail: (l1: number) =>
     request<ShelvesDetail>(`/api/shelves${qs({ l1, with_packages: "1" })}`),

@@ -5,7 +5,7 @@ import { AisleView } from "../components/aisleView";
 import { TimelineView } from "../components/TimelineView";
 import { useReaderOverlay } from "../components/ReaderOverlay";
 import PackageDetailBody from "../components/PackageDetailBody";
-import { buildRackVMs } from "../components/shelfVM";
+import { buildRackVMs, type RackVM } from "../components/shelfVM";
 import { Empty, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
@@ -17,6 +17,7 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [selectedRack, setSelectedRack] = useState<string | null>(null);
   const [detailPkg, setDetailPkg] = useState<PackageDetail | null>(null);
+  const [rackVMs, setRackVMs] = useState<Map<string, RackVM>>(new Map());
   const tree = useCategories((s) => s.tree);
   const loadCategories = useCategories((s) => s.load);
   const { push } = useToast();
@@ -30,8 +31,10 @@ export default function LibraryPage() {
     setLoading(true);
     setSelectedRack(null);
     setDetailPkg(null);
+    setRackVMs(new Map());
+    // 概览轻载荷（SQL 聚合计数，零包体）——进架才按组拉包
     api
-      .shelvesDetail(Number(l1Id))
+      .shelvesOverview(Number(l1Id))
       .then(setData)
       .catch((err) => push("error", err instanceof Error ? err.message : "加载失败"))
       .finally(() => setLoading(false));
@@ -39,7 +42,23 @@ export default function LibraryPage() {
 
   const l1 = tree.find((n) => n.id === Number(l1Id));
   const racks = useMemo(() => (data ? buildRackVMs(data) : []), [data]);
-  const currentRack = racks.find((r) => r.key === selectedRack) ?? null;
+  /** 架 key（g<l2id>-<gi>）→ l2 标识（数字 id 或 "none"） */
+  const l2KeyOf = (rackKey: string) => rackKey.split("-")[0]!.slice(1);
+  const currentL2Key = selectedRack !== null ? l2KeyOf(selectedRack) : null;
+  const currentRack = currentL2Key !== null ? (rackVMs.get(currentL2Key) ?? null) : null;
+
+  const handleRackSelect = (key: string) => {
+    setSelectedRack(key);
+    const l2key = l2KeyOf(key);
+    if (rackVMs.has(l2key)) return;
+    api
+      .shelfRack(Number(l1Id), l2key)
+      .then((d) => {
+        const vm = buildRackVMs(d).find((r) => l2KeyOf(r.key) === l2key) ?? null;
+        if (vm !== null) setRackVMs((prev) => new Map(prev).set(l2key, vm));
+      })
+      .catch((err) => push("error", err instanceof Error ? err.message : "加载失败"));
+  };
 
   const openPackage = async (pkgId: number) => {
     try {
@@ -106,14 +125,16 @@ export default function LibraryPage() {
 
       {/* 视图主体 */}
       <div className="relative min-h-0 flex-1">
-        {currentRack ? (
+        {currentRack !== null ? (
           <TimelineView
             rack={currentRack}
             onBack={() => setSelectedRack(null)}
             onPackageClick={(id) => void openPackage(id)}
           />
+        ) : selectedRack !== null ? (
+          <div className="flex h-full items-center justify-center text-sm text-stone-400">正在上架…</div>
         ) : (
-          <AisleView racks={racks} onRackSelect={(key) => setSelectedRack(key)} />
+          <AisleView racks={racks} onRackSelect={handleRackSelect} />
         )}
 
         {detailPkg && (
