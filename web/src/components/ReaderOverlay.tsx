@@ -463,6 +463,8 @@ function TextReader({
       }
     };
     el.addEventListener("scroll", onScroll, { passive: true });
+    // 一屏即整读：无滚动距离时打开即 100%——滚动事件永远不会发生，不补这条短文永不记进度
+    if (el.scrollHeight - el.clientHeight <= 0) onScroll();
     return () => {
       el.removeEventListener("scroll", onScroll);
     };
@@ -529,9 +531,13 @@ function DocReader({
         iframe.addEventListener("load", () => {
           measure();
           setTimeout(measure, 500); // 图片/字体后到时再校一次高度
-          if (startPct > 0) {
-            const el = wrapRef.current;
-            if (el) el.scrollTop = (el.scrollHeight - el.clientHeight) * (startPct / 100);
+          const wrap = wrapRef.current;
+          if (wrap && wrap.scrollHeight - wrap.clientHeight <= 0) {
+            // 一屏即整读：无滚动距离时打开即 100%（须在 measure 之后判定——iframe 高度未定前 wrap 无滚动距离）
+            reportedRef.current = 100;
+            onProgress({ scroll: 100 }, 100);
+          } else if (startPct > 0 && wrap) {
+            wrap.scrollTop = (wrap.scrollHeight - wrap.clientHeight) * (startPct / 100);
           }
         });
         boxRef.current?.appendChild(iframe);
