@@ -181,6 +181,10 @@ CREATE TABLE IF NOT EXISTS sync_manifest_build (
   text TEXT NOT NULL,
   stamp TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sync_bucket_cache (
+  path TEXT PRIMARY KEY,
+  sha256 TEXT NOT NULL
+);
 
 CREATE INDEX IF NOT EXISTS ix_files_sha256 ON files (sha256);
 `);
@@ -188,6 +192,16 @@ CREATE INDEX IF NOT EXISTS ix_files_sha256 ON files (sha256);
   addColumn(db, "sync_tombstones", "blob_refs", "TEXT");
   // 移除短暂的本地 GC 记账表（方案改为云端墓碑记账）
   db.exec("DROP TABLE IF EXISTS sync_gc_pending");
+  // v2 分桶布局一次性迁移：清逐实体云态缓存（清单缓存+集合哈希）→ 下次同步按新布局全量重推。
+  // 基线/墓碑/构建缓存按逻辑键保留——信封字节不变，基线仍有效。
+  const v2 = db.prepare("SELECT value FROM sync_state WHERE key = 'layout_v2'").get() as
+    | { value: string }
+    | undefined;
+  if (v2 === undefined) {
+    db.exec("DELETE FROM sync_manifest_cache");
+    db.prepare("DELETE FROM sync_state WHERE key = 'col_hashes'").run();
+    db.prepare("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('layout_v2', '1')").run();
+  }
   // 全文搜索（trigram 分词：支持中文子串；≥3 字查询走 FTS，短查询回退 LIKE）
   db.exec(`
 CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(

@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 import {
   LIBRARY_INDEX_PATH,
   blobPath,
+  bucketOf,
+  bucketPath,
+  bucketText,
+  collectionIndexPath,
   envelope,
   manifestPath,
   manifestText,
@@ -55,6 +59,7 @@ class MemoryDevice implements LocalDevice {
   }
   blobs = new Map<string, Uint8Array>();
   manifestCache = new Map<string, string>();
+  bucketShas = new Map<string, string>();
   colHashes: Partial<Record<Collection, string>> = {};
   blobCache = new Set<string>();
   revision = 0;
@@ -133,8 +138,9 @@ class MemoryDevice implements LocalDevice {
       local && !local.deleted ? { updatedAt: local.updatedAt, uuid: local.uuid } : null,
       remote,
     );
-    if (outcome === "local-newer" && local !== undefined && !local.deleted) {
-      // 远端较旧但可能带本地没见过的第三方字段变更：吸收进本地（时间戳保持本地新值）
+    if (outcome === "local-newer" && local !== undefined && !local.deleted && !remote.deleted) {
+      // 远端较旧但可能带本地没见过的第三方字段变更：吸收进本地（时间戳保持本地新值）。
+      // 墓碑不做字段吸收——墓碑 data={} 是「无数据」不是「逐字段删除」（与服务端语义一致）。
       const path = manifestPath(remote.kind, remote.uuid);
       const baseline = this.baselines.get(path);
       if (baseline !== undefined && !baseline.deleted && !jsonEq(remote.data, baseline.data)) {
@@ -183,6 +189,12 @@ class MemoryDevice implements LocalDevice {
   }
   async setManifestCache(entries: Map<string, string>) {
     this.manifestCache = entries;
+  }
+  async getBucketShas() {
+    return this.bucketShas;
+  }
+  async setBucketShas(entries: Map<string, string>) {
+    this.bucketShas = entries;
   }
   async getCollectionHashes() {
     return this.colHashes;
@@ -400,10 +412,11 @@ describe("同步引擎", () => {
     a.hardDelete("files", "c1".padEnd(32, "0"));
     const r1 = await fullSync(a, cloud);
     expect(r1.push.tombstoned).toBe(1);
-    const cloudTomb = JSON.parse(
-      (cloud.files.get(manifestPath("files", "c1".padEnd(32, "0"))) as string) as string,
-    ) as ManifestEnvelope;
-    expect(cloudTomb.deleted).toBe(true);
+    // v2：墓碑在桶文件内
+    const fileBucket = JSON.parse(
+      cloud.files.get(bucketPath("files", bucketOf("c1".padEnd(32, "0")))) as string,
+    ) as { entities: Record<string, ManifestEnvelope> };
+    expect(fileBucket.entities["c1".padEnd(32, "0")]?.deleted).toBe(true);
 
     const r2 = await fullSync(b, cloud);
     expect(r2.pull.tombstones).toBe(1);
@@ -468,7 +481,7 @@ describe("同步引擎", () => {
     expect(r.applied).toBe(0);
   });
 
-  it("blob 缺失本地 → 清单跳过不悬空", async () => {
+  it("blob 缺失本地 → 所在桶整体跳过不悬空，其他桶照常", async () => {
     const cloud = new MemoryRemote();
     const a = new MemoryDevice("A");
     seedDevice(a);
@@ -477,10 +490,13 @@ describe("同步引擎", () => {
     // 首推前 blobCache 为空 → head 云端无 → readBlob null → 跳过
     const r = await fullSync(a, cloud);
     expect(r.push.skippedNoBlob).toBe(1);
-    // 文件清单未上云 → 索引里没有它
-    expect(cloud.files.has(manifestPath("files", "c1".padEnd(32, "0")))).toBe(false);
-    // 但包/分类等其他实体照常上传
-    expect(cloud.files.has(manifestPath("packages", "b1".padEnd(32, "0")))).toBe(true);
+    // v2：桶是成员权威——文件实体缺块 → 整桶放弃（桶文件不出现，云端不会丢员）
+    expect(cloud.files.has(bucketPath("files", bucketOf("c1".padEnd(32, "0"))))).toBe(false);
+    // 但包/分类等其他桶照常上传
+    const pkgBucket = JSON.parse(
+      cloud.files.get(bucketPath("packages", bucketOf("b1".padEnd(32, "0")))) as string,
+    ) as { entities: Record<string, ManifestEnvelope> };
+    expect(pkgBucket.entities["b1".padEnd(32, "0")]).toBeTruthy();
   });
 
   it("双端先后推送 → 索引并集不丢条目", async () => {
@@ -507,8 +523,89 @@ describe("同步引擎", () => {
       expect(dev.get("categories", "f1".padEnd(32, "0"))).toBeTruthy();
       expect(dev.get("categories", "f2".padEnd(32, "0"))).toBeTruthy();
     }
-    // 云端集合索引条目 = 双方实体总数（不丢）
-    const idx = JSON.parse((cloud.files.get("db/categories.json") as string) as string) as Record<string, string>;
-    expect(Object.keys(idx).length).toBe(3);
+    // v2：桶索引列出全部非空桶；桶内实体总数 = 双方实体总数（不丢）
+    const idx = JSON.parse(cloud.files.get(collectionIndexPath("categories")) as string) as Record<string, string>;
+    const total = Object.keys(idx).reduce(
+      (n, b) =>
+        n + Object.keys((JSON.parse(cloud.files.get(bucketPath("categories", b)) as string) as { entities: Record<string, unknown> }).entities).length,
+      0,
+    );
+    expect(total).toBe(3);
+  });
+
+  // ---------- v2 分桶专项 ----------
+
+  it("桶序列化：确定性 + 传入顺序无关（uuid 字典序）", async () => {
+    const envs = [
+      envelope("packages", "ff".padEnd(32, "f"), "2026-01-01T00:00:00.000Z", { title: "1" }),
+      envelope("packages", "0f".padEnd(32, "f"), "2026-01-02T00:00:00.000Z", { title: "2" }),
+    ];
+    const t1 = bucketText("packages", "0007", envs);
+    const t2 = bucketText("packages", "0007", [envs[1]!, envs[0]!]); // 乱序传入
+    expect(t2).toBe(t1);
+    expect(t1.indexOf('"0fff')).toBeLessThan(t1.indexOf('"ffff')); // 键有序
+  });
+
+  it("桶分布：连续 uuid 全桶覆盖均匀；非 hex 键确定性", () => {
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 10240; i++) {
+      // 前 8 位 = 补零的 i → parseInt = i → i % 1024 轮转全覆盖（每桶恰 10 个）
+      const uuid = i.toString(16).padStart(8, "0").padEnd(32, "0");
+      const b = bucketOf(uuid);
+      counts.set(b, (counts.get(b) ?? 0) + 1);
+    }
+    expect(counts.size).toBe(1024);
+    for (const n of counts.values()) expect(n).toBe(10);
+    expect(bucketOf("global")).toBe(bucketOf("global"));
+    expect(Number(bucketOf("l2-abc"))).toBeLessThan(1024);
+  });
+
+  it("布局版本守卫：云端 v1 library.json → 拒绝同步", async () => {
+    const cloud = new MemoryRemote();
+    cloud.files.set(LIBRARY_INDEX_PATH, JSON.stringify({ manifestVersion: 1, revision: 3, collections: {} }));
+    const a = new MemoryDevice("A");
+    seedDevice(a);
+    await expect(fullSync(a, cloud)).rejects.toThrow(/v1/);
+  });
+
+  it("v1→v2 迁移：云态缓存清空后按新布局全量重推，B 仍可恢复", async () => {
+    const cloud = new MemoryRemote();
+    const a = new MemoryDevice("A");
+    seedDevice(a);
+    await fullSync(a, cloud);
+    // 模拟迁移：云端清单层清空（blobs 保留）+ 设备侧云态缓存清空（db 迁移 layout_v2 做的事）
+    for (const k of [...cloud.files.keys()]) {
+      if (k.startsWith("db/") || k === LIBRARY_INDEX_PATH) cloud.files.delete(k);
+    }
+    a.manifestCache = new Map();
+    a.bucketShas = new Map();
+    a.colHashes = {};
+    const r = await fullSync(a, cloud);
+    expect(r.push.uploadedManifests).toBe(5);
+    const lib = JSON.parse(cloud.files.get(LIBRARY_INDEX_PATH) as string) as { manifestVersion: number };
+    expect(lib.manifestVersion).toBe(2);
+    expect(cloud.files.has(collectionIndexPath("packages"))).toBe(true);
+    const b = new MemoryDevice("B");
+    const rb = await fullSync(b, cloud);
+    expect(rb.pull.applied).toBe(5);
+  });
+
+  it("丢失墓碑记忆 → 对照云端桶采纳既有墓碑（不重造、不重置时钟）", async () => {
+    const cloud = new MemoryRemote();
+    const a = new MemoryDevice("A");
+    seedDevice(a);
+    await fullSync(a, cloud);
+    const b = new MemoryDevice("B");
+    await fullSync(b, cloud);
+    a.hardDelete("files", "c1".padEnd(32, "0"));
+    await fullSync(a, cloud);
+    await fullSync(b, cloud); // B 应用墓碑
+    // B 丢失墓碑记忆（实体与记忆都没了，缓存仍认领）→ 兜底网走云端对照
+    b.tombstones.delete(manifestPath("files", "c1".padEnd(32, "0")));
+    const bPath = bucketPath("files", bucketOf("c1".padEnd(32, "0")));
+    const before = cloud.files.get(bPath);
+    const r = await fullSync(b, cloud);
+    expect(r.push.uploadedManifests).toBe(0); // 云端已是墓碑 → 采纳 → 桶字节不变
+    expect(cloud.files.get(bPath)).toBe(before);
   });
 });

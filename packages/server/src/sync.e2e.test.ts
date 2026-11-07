@@ -2,11 +2,12 @@
  * 走完整 API 链路验证 准备云端→新机恢复→编辑收敛→释放/透明取回→删除传播→WebDAV 传输。
  * 云协议用 fs（本地目录）+ WebDAV（自建迷你服务，真实 HTTP 全动词）。 */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Hono } from "hono";
 import type { AddressInfo } from "node:net";
+import { COLLECTIONS } from "@zzlibrary/core";
 import type { Env } from "./env";
 
 let cloudDir = "";
@@ -149,6 +150,12 @@ describe("同步：fs 云（本地目录）", () => {
     expect(existsSync(join(cloudDir, "library.json"))).toBe(true);
     expect(existsSync(join(cloudDir, "db", "packages"))).toBe(true);
     expect(existsSync(join(cloudDir, "blobs"))).toBe(true);
+    // v2 分桶布局：桶索引 .idx.json + 桶文件；云对象数 ≤ 实体数 + 每集合一个 idx（小库=每桶 1~2 实体）
+    const lib = JSON.parse(readFileSync(join(cloudDir, "library.json"), "utf-8")) as { manifestVersion: number };
+    expect(lib.manifestVersion).toBe(2);
+    expect(existsSync(join(cloudDir, "db", "packages.idx.json"))).toBe(true);
+    const dbObjs = readdirSync(join(cloudDir, "db"), { recursive: true }).filter((p) => String(p).endsWith(".json")).length;
+    expect(dbObjs).toBeLessThanOrEqual(rep.push.uploadedManifests + COLLECTIONS.length);
   });
 
   it("B 新机恢复：只拉清单即浏览；打开文件才取回字节", async () => {
@@ -261,12 +268,11 @@ describe("同步：fs 云（本地目录）", () => {
     {
       const { readdirSync: rd, readFileSync: rf } = await import("node:fs");
       const dir = join(cloudDir, "db", "files");
+      // v2：桶文件直接在 db/files/ 下（db/files/<桶号>.json），聚合内含实体/墓碑
       let found = false;
-      for (const d of rd(dir)) {
-        for (const f of rd(join(dir, d))) {
-          const text = rf(join(dir, d, f), "utf-8");
-          if (text.includes(sha.slice(0, 16))) found = true;
-        }
+      for (const f of rd(dir)) {
+        const text = rf(join(dir, f), "utf-8");
+        if (text.includes(sha.slice(0, 16))) found = true;
       }
       expect(found).toBe(true); // 文件墓碑 data.blobRefs 含该内容块
     }

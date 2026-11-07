@@ -873,6 +873,32 @@ export class SqliteSyncDevice implements LocalDevice {
       }
     });
   }
+  async getBucketShas(): Promise<Map<string, string>> {
+    const m = new Map<string, string>();
+    for (const r of pstmt(this.db, "SELECT path, sha256 FROM sync_bucket_cache").all() as Array<{ path: string; sha256: string }>) {
+      m.set(r.path, r.sha256);
+    }
+    return m;
+  }
+  async setBucketShas(entries: Map<string, string>): Promise<void> {
+    // 增量写（同 setManifestCache；桶数封顶 6×1024，但保持同一模式）
+    inTransaction(this.db, () => {
+      const existing = new Map(
+        (pstmt(this.db, "SELECT path, sha256 FROM sync_bucket_cache").all() as Array<{ path: string; sha256: string }>).map(
+          (r) => [r.path, r.sha256],
+        ),
+      );
+      const ins = pstmt(this.db, "INSERT OR REPLACE INTO sync_bucket_cache (path, sha256) VALUES (?, ?)");
+      const del = pstmt(this.db, "DELETE FROM sync_bucket_cache WHERE path = ?");
+      for (const [path, sha] of entries) {
+        if (existing.get(path) === sha) continue;
+        ins.run(path, sha);
+      }
+      for (const path of existing.keys()) {
+        if (!entries.has(path)) del.run(path);
+      }
+    });
+  }
   async getCollectionHashes(): Promise<Partial<Record<Collection, string>>> {
     const row = pstmt(this.db, "SELECT value FROM sync_state WHERE key = 'col_hashes'").get() as
       | { value: string }

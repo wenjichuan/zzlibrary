@@ -10,10 +10,15 @@ import {
   createWebDavStore,
   fullSync,
   blobPath,
+  bucketOf,
+  bucketPath,
   collectionIndexPath,
   COLLECTIONS,
   LIBRARY_INDEX_PATH,
+  parseManifestPath,
   sha256Hex,
+  type BucketAggregate,
+  type Collection,
   type FullSyncReport,
   type RemoteStore,
 } from "@zzlibrary/core";
@@ -392,7 +397,7 @@ export class SyncService {
       }
     }
 
-    // 2) 过期墓碑清理（parsed 本就只含墓碑行）
+    // 2) 过期墓碑清理（v2 桶化：墓碑实体在桶文件内 → 取桶删实体重传；桶空则删桶文件 + idx 条目）
     const expiredPaths: string[] = [];
     for (const { path, env } of parsed) {
       if (env === null || env.deleted !== true) continue;
@@ -404,15 +409,78 @@ export class SyncService {
       const libText = await remote.getText(LIBRARY_INDEX_PATH);
       if (libText === null) throw new Error("云端没有 library.json（数据异常）");
       const lib = JSON.parse(libText) as { revision?: number; collections: Record<string, string> };
-      for (const kind of COLLECTIONS) {
-        const paths = expiredPaths.filter((p) => p.startsWith(`db/${kind}/`));
-        if (paths.length === 0) continue;
-        for (const p of paths) {
-          if (remote.remove !== undefined) await remote.remove(p);
+      // 过期实体按桶分组
+      const groups = new Map<string, { kind: Collection; bucket: string; uuids: Set<string>; paths: string[] }>();
+      for (const p of expiredPaths) {
+        const parsed2 = parseManifestPath(p);
+        if (parsed2 === null) continue;
+        const bucket = bucketOf(parsed2.uuid);
+        const key = `${parsed2.kind}/${bucket}`;
+        let g = groups.get(key);
+        if (g === undefined) {
+          g = { kind: parsed2.kind, bucket, uuids: new Set(), paths: [] };
+          groups.set(key, g);
         }
+        g.uuids.add(parsed2.uuid);
+        g.paths.push(p);
+      }
+      // idx 变更记账：桶路径 → 新 sha（undefined=桶已空，删 idx 条目）
+      const idxUpdates = new Map<string, string | undefined>();
+      const cleanedPaths: string[] = [];
+      for (const g of groups.values()) {
+        const bPath = bucketPath(g.kind, g.bucket);
+        const text = await remote.getText(bPath);
+        if (text === null) {
+          // 云端桶已不存在（他端 GC 过）——云端已净，本地行可直接清
+          idxUpdates.set(bPath, undefined);
+          cleanedPaths.push(...g.paths);
+          continue;
+        }
+        let agg: BucketAggregate;
+        try {
+          agg = JSON.parse(text) as BucketAggregate;
+        } catch {
+          report.errors.push(`桶解析失败：${bPath}（跳过，本地记忆保留防回弹）`);
+          continue;
+        }
+        let removed = 0;
+        for (const uuid of g.uuids) {
+          if (agg.entities[uuid] !== undefined) {
+            delete agg.entities[uuid];
+            removed += 1;
+          }
+        }
+        if (removed === 0) {
+          cleanedPaths.push(...g.paths); // 云端桶已无这些实体（他端先清）——补本地清理
+          continue;
+        }
+        const remaining = Object.keys(agg.entities).length;
+        const newText = JSON.stringify(agg); // 解析保序+删除保序 → 仍为规范序列化
+        if (remaining === 0) {
+          if (remote.remove !== undefined) await remote.remove(bPath);
+          idxUpdates.set(bPath, undefined);
+          this.db.prepare("DELETE FROM sync_bucket_cache WHERE path = ?").run(bPath);
+        } else {
+          const sha = await sha256Hex(newText);
+          await remote.putText(bPath, newText);
+          idxUpdates.set(bPath, sha);
+          this.db
+            .prepare("INSERT OR REPLACE INTO sync_bucket_cache (path, sha256) VALUES (?, ?)")
+            .run(bPath, sha);
+        }
+        cleanedPaths.push(...g.paths);
+      }
+      // idx 重建（被触碰集合）→ library.json
+      const touchedKinds = new Set<Collection>([...idxUpdates.keys()].map((p) => p.split("/")[1] as Collection));
+      for (const kind of touchedKinds) {
         const idxText = await remote.getText(collectionIndexPath(kind));
         const index: Record<string, string> = idxText === null ? {} : JSON.parse(idxText);
-        for (const p of paths) delete index[p];
+        for (const [bPath, sha] of idxUpdates) {
+          if (!bPath.startsWith(`db/${kind}/`)) continue;
+          const bucket = bPath.slice(`db/${kind}/`.length, -".json".length);
+          if (sha === undefined) delete index[bucket];
+          else index[bucket] = sha;
+        }
         const text = JSON.stringify(index);
         await remote.putText(collectionIndexPath(kind), text);
         lib.collections[kind] = await sha256Hex(text);
@@ -420,7 +488,7 @@ export class SyncService {
       const revision = Math.max(lib.revision ?? 0, await this.revisionOf()) + 1;
       lib.revision = revision;
       await remote.putText(LIBRARY_INDEX_PATH, JSON.stringify(lib));
-      for (const p of expiredPaths) {
+      for (const p of cleanedPaths) {
         this.db.prepare("DELETE FROM sync_baselines WHERE path = ?").run(p);
         this.db.prepare("DELETE FROM sync_manifest_cache WHERE path = ?").run(p);
         this.db.prepare("DELETE FROM sync_tombstones WHERE path = ?").run(p);
@@ -428,7 +496,7 @@ export class SyncService {
       this.db
         .prepare("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('revision', ?)")
         .run(String(revision));
-      report.tombstonesRemoved = expiredPaths.length;
+      report.tombstonesRemoved = cleanedPaths.length;
     }
     return report;
   }
