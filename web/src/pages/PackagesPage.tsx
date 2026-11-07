@@ -22,19 +22,33 @@ const SORTS: Record<string, string> = {
   date_desc: "时间 ↓",
 };
 
-/** 分页页码列表：总页数 ≤7 全显；否则恒显首末页与当前页 ±1，缺口用省略号 */
-function pageList(current: number, total: number): (number | "…")[] {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-  const keep = new Set<number>([1, total, current - 1, current, current + 1]);
-  const out: (number | "…")[] = [];
-  let prev = 0;
-  for (let p = 1; p <= total; p++) {
-    if (!keep.has(p)) continue;
-    if (p - prev > 1) out.push("…");
-    out.push(p);
-    prev = p;
-  }
-  return out;
+/** 页码直达输入框：原「第几页 / 总页数」位置——键入页数回车（或失焦）跳转，越界夹取到 [1, totalPages]，非数字忽略 */
+function PageJump({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
+  const [text, setText] = useState(String(page));
+  useEffect(() => setText(String(page)), [page]);
+  const commit = () => {
+    const n = parseInt(text, 10);
+    if (Number.isFinite(n)) onPage(Math.min(Math.max(1, n), totalPages));
+    else setText(String(page));
+  };
+  return (
+    <span className="flex items-center gap-1">
+      <input
+        aria-label="跳转到指定页"
+        value={text}
+        onChange={(e) => setText(e.target.value.replace(/\D/g, ""))}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            commit();
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className="h-7 w-11 rounded-lg border border-stone-200 px-2 text-center text-xs tabular-nums text-stone-700 focus:border-amber-500 focus:outline-none"
+      />
+      <span>/ {totalPages}</span>
+    </span>
+  );
 }
 
 function formatPath(p: { l1?: { name: string } | null; l2?: { name: string } | null; l3?: { name: string } | null }): string {
@@ -272,27 +286,7 @@ export default function PackagesPage() {
               <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                 ← 上一页
               </Button>
-              <div className="flex items-center gap-1">
-                {pageList(data.page, totalPages).map((p, i) =>
-                  p === "…" ? (
-                    <span key={`e${i}`} className="px-1 text-stone-300">
-                      …
-                    </span>
-                  ) : (
-                    <button
-                      key={p}
-                      onClick={() => setPage(p)}
-                      className={
-                        p === data.page
-                          ? "h-7 w-7 rounded-lg bg-amber-700 text-xs text-white"
-                          : "h-7 w-7 rounded-lg text-xs text-stone-500 hover:bg-amber-50 hover:text-amber-800"
-                      }
-                    >
-                      {p}
-                    </button>
-                  ),
-                )}
-              </div>
+              <PageJump page={data.page} totalPages={totalPages} onPage={setPage} />
               <Button variant="ghost" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
                 下一页 →
               </Button>
