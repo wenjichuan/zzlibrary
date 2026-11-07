@@ -65,7 +65,10 @@ export default function LibraryPage() {
 
   const openPackage = async (pkgId: number) => {
     try {
-      setDetailPkg(await api.getPackage(pkgId));
+      const fresh = await api.getPackage(pkgId);
+      setDetailPkg(fresh);
+      // 就地补丁架缓存里该包的状态——时间轴悬停卡不再陈旧（②）
+      setRackVMs((prev) => patchPackageStatus(prev, pkgId, fresh.status));
     } catch (err) {
       push("error", err instanceof Error ? err.message : "加载失败");
     }
@@ -182,4 +185,26 @@ function PackageDrawer({
       </div>
     </div>
   );
+}
+
+/** 架缓存内就地补丁某包状态（读完/编辑后悬停卡不陈旧）；未命中的架原引用保留。 */
+function patchPackageStatus(prev: Map<string, RackVM>, pkgId: number, status: string): Map<string, RackVM> {
+  const next = new Map<string, RackVM>();
+  for (const [key, vm] of prev) {
+    const hit = vm.floors.some((f) => f.dated.some((p) => p.id === pkgId) || f.undated.some((p) => p.id === pkgId));
+    if (!hit) {
+      next.set(key, vm);
+      continue;
+    }
+    next.set(key, {
+      ...vm,
+      floors: vm.floors.map((f) => ({
+        ...f,
+        dated: f.dated.map((p) => (p.id === pkgId ? { ...p, status } : p)),
+        undated: f.undated.map((p) => (p.id === pkgId ? { ...p, status } : p)),
+        ingest: f.ingest.map((p) => (p.id === pkgId ? { ...p, status } : p)),
+      })),
+    });
+  }
+  return next;
 }
