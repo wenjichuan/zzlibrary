@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { prettyDisplayDate } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail, type PackageDetail } from "@zzlibrary/shared/client";
 import { useToast } from "../stores/toast";
@@ -33,6 +33,11 @@ export default function PackageDetailBody({
 }) {
   const { push } = useToast();
   const [releasing, setReleasing] = useState(false);
+  // 长列表上限：几百文件的包先出前 50 条，「显示全部」再放行（封面 img 风暴防护）
+  const FILE_LIMIT = 50;
+  const [showAllFiles, setShowAllFiles] = useState(false);
+  useEffect(() => setShowAllFiles(false), [detail.id]);
+  const visibleFiles = showAllFiles ? detail.files : detail.files.slice(0, FILE_LIMIT);
   const lastRead = useMemo(
     () =>
       [...detail.files]
@@ -100,9 +105,17 @@ export default function PackageDetailBody({
           )}
         </div>
         <div className="space-y-2">
-          {detail.files.map((f) => (
+          {visibleFiles.map((f) => (
             <FileRow key={f.id} file={f} showProgress onRead={onRead} />
           ))}
+          {detail.files.length > FILE_LIMIT && !showAllFiles && (
+            <button
+              className="w-full rounded-lg border border-stone-200 py-2 text-xs text-stone-500 hover:border-amber-500 hover:text-amber-700"
+              onClick={() => setShowAllFiles(true)}
+            >
+              显示全部 {detail.files.length} 个文件
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -385,6 +385,26 @@ packagesRouter.get("/api/packages", (c) => {
   return c.json({ total, page, page_size: pageSize, items });
 });
 
+/** 存量 PDF 封面补齐的工作清单（设置页）：无真封面且含 pdf 的包 + 首个 pdf 文件 id——轻查询，替代客户端「逐包拉完整详情」的 N+1。 */
+packagesRouter.get("/api/packages/needs-cover", (c) => {
+  const db = c.get("db");
+  const rows = db
+    .prepare(
+      "SELECT p.id AS pkg_id, p.title AS title, f.id AS file_id FROM packages p" +
+        " JOIN files f ON f.package_id = p.id AND f.format = 'pdf'" +
+        " WHERE p.cover_sha256 IS NULL ORDER BY p.id, f.sort_order, f.id",
+    )
+    .all() as Array<{ pkg_id: number; title: string; file_id: number }>;
+  const items: Array<{ pkg_id: number; title: string; file_id: number }> = [];
+  const seen = new Set<number>();
+  for (const r of rows) {
+    if (seen.has(r.pkg_id)) continue; // 一个包多个 pdf 只取第一个
+    seen.add(r.pkg_id);
+    items.push(r);
+  }
+  return c.json({ items });
+});
+
 function parseIdFilterNullable(raw: string | null | undefined): [number | null, boolean] {
   if (raw === null || raw === undefined || raw === "") return [null, false];
   if (raw === "none") return [null, true];

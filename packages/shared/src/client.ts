@@ -81,6 +81,8 @@ export const api = {
   }, signal?: AbortSignal) =>
     request<PackagePage>(`/api/packages${qs(params)}`, signal ? { signal } : undefined),
   getPackage: (id: number) => request<PackageDetail>(`/api/packages/${id}`),
+  needsCoverPackages: () =>
+    request<{ items: Array<{ pkg_id: number; title: string; file_id: number }> }>("/api/packages/needs-cover"),
   updatePackage: (id: number, patch: Partial<PackageMetaInput>) =>
     request<PackageDetail>(`/api/packages/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePackage: (id: number) => request<{ ok: boolean }>(`/api/packages/${id}`, { method: "DELETE" }),

@@ -120,32 +120,17 @@ export default function SettingsPage() {
     }
   };
 
-  /** 存量 PDF 封面补齐：逐包用首页渲染真封面并上传（浏览器渲染，无服务端依赖）。 */
+  /** 存量 PDF 封面补齐：服务端轻清单（无真封面且含 pdf 的包+文件 id）→ 逐包渲染上传。不再逐包拉完整详情（N+1）。 */
   const backfillCovers = async () => {
     setBackfill({ running: true, done: 0, total: 0 });
-    let done = 0;
-    let total = 0;
     try {
-      for (let page = 1; ; page++) {
-        const list = await api.listPackages({ format: "pdf", page, page_size: 100 });
-        total = list.total;
-        if (list.items.length === 0) break;
-        for (const item of list.items) {
-          const detail = await api.getPackage(item.id);
-          if (detail.has_real_cover === true) {
-            done += 1;
-            setBackfill({ running: true, done, total });
-            continue;
-          }
-          const pdfFile = detail.files.find((f) => f.format === "pdf");
-          if (pdfFile !== undefined) {
-            const cover = await renderPdfCoverFromFile(pdfFile.id);
-            if (cover !== null) await api.uploadCover(item.id, cover);
-          }
-          done += 1;
-          setBackfill({ running: true, done, total });
-        }
-        if (page * 100 >= total) break;
+      const { items } = await api.needsCoverPackages();
+      let done = 0;
+      for (const item of items) {
+        const cover = await renderPdfCoverFromFile(item.file_id);
+        if (cover !== null) await api.uploadCover(item.pkg_id, cover);
+        done += 1;
+        setBackfill({ running: true, done, total: items.length });
       }
       push("success", `PDF 封面补齐完成（共 ${done} 包）`);
     } catch (err) {
