@@ -2,17 +2,9 @@
  * EPUB=foliate-js（CFI 定位）· PDF=pdfjs-dist（页码）· TXT/MD/HTML/docx=文档渲染 ·
  * 图片/音频/视频=原生（播放百分比）。进度节流写回 PUT /api/progress，关闭时冲刷。 */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatKind, isReadableFormat } from "@zzlibrary/core";
 import { api } from "@zzlibrary/shared";
 import type { FileDetail, Progress } from "@zzlibrary/shared";
-
-export function readableFormat(format: string): boolean {
-  return [
-    "epub", "pdf", "txt", "md", "html", "docx",
-    "jpg", "jpeg", "png", "gif", "webp",
-    "mp3", "m4a", "wav", "ogg", "flac",
-    "mp4", "m4v", "webm", "mov", "mkv",
-  ].includes(format);
-}
 
 const DOC_CSS = `<style>
 body{font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
@@ -144,18 +136,18 @@ export default function ReaderOverlay({ pkgTitle, file, initialProgress, onClose
             {(file.format === "md" || file.format === "html" || file.format === "docx") && (
               <DocReader file={file} initialProgress={initialProgress} onProgress={save} setError={setError} />
             )}
-            {["jpg", "jpeg", "png", "gif", "webp"].includes(file.format) && (
+            {formatKind(file.format) === "image" && (
               <div className="flex h-full items-center justify-center p-4">
                 <img src={api.fileUrl(file.id)} alt={file.name} className="max-h-full max-w-full object-contain" />
               </div>
             )}
-            {["mp3", "m4a", "wav", "ogg", "flac"].includes(file.format) && (
+            {formatKind(file.format) === "audio" && (
               <MediaReader file={file} initialProgress={initialProgress} onProgress={save} kind="audio" />
             )}
-            {["mp4", "m4v", "webm", "mov", "mkv"].includes(file.format) && (
+            {formatKind(file.format) === "video" && (
               <MediaReader file={file} initialProgress={initialProgress} onProgress={save} kind="video" />
             )}
-            {!readableFormat(file.format) && (
+            {!isReadableFormat(file.format) && (
               <div className="flex h-full items-center justify-center text-sm text-stone-400">
                 该格式（{file.format.toUpperCase()}）不支持内置阅读，可在详情页下载原图
               </div>

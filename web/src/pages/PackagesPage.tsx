@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CANONICAL_FORMATS } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail, type Package, type PackageDetail, type PackagePage } from "@zzlibrary/shared";
 import PackageMetaForm, { metaFromPackage, metaToInput, type MetaFormValue } from "../components/PackageMetaForm";
 import { Button, Empty, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
@@ -9,10 +10,8 @@ import ReaderOverlay from "../components/ReaderOverlay";
 import FileRow, { FORMAT_ICONS } from "../components/FileRow";
 import { renderPdfCover } from "../utils/pdfCover";
 
-const FORMATS = [
-  "", "epub", "pdf", "txt", "md", "html", "docx", "pptx", "xlsx",
-  "mp4", "webm", "mov", "mkv", "mp3", "wav", "flac", "jpg", "png",
-];
+/** 格式筛选选项从 core 格式注册表派生（全量规范名），勿手抄清单 */
+const FORMATS = ["", ...CANONICAL_FORMATS];
 const STATUSES = ["", "未读", "在读", "已读"];
 const SORTS: Record<string, string> = {
   newest: "最新入库",

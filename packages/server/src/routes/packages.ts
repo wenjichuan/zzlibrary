@@ -16,7 +16,7 @@ import { Readable } from "node:stream";
 import { createHash, randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { detectFormat, displayDate, parsePartialDate } from "@zzlibrary/core";
+import { detectFormat, displayDate, mediaTypeOf, parsePartialDate } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { resolvePaths } from "../deps";
 import {
@@ -41,31 +41,6 @@ function sha256Of(bytes: Uint8Array): string {
 }
 
 export const packagesRouter = new Hono<Env>();
-
-const MEDIA_TYPES: Record<string, string> = {
-  epub: "application/epub+zip",
-  pdf: "application/pdf",
-  txt: "text/plain; charset=utf-8",
-  md: "text/markdown; charset=utf-8",
-  html: "text/html; charset=utf-8",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  mp4: "video/mp4",
-  m4v: "video/mp4",
-  webm: "video/webm",
-  mov: "video/quicktime",
-  mkv: "video/x-matroska",
-  mp3: "audio/mpeg",
-  m4a: "audio/mp4",
-  wav: "audio/wav",
-  ogg: "audio/ogg",
-  flac: "audio/flac",
-  jpg: "image/jpeg",
-  png: "image/png",
-  gif: "image/gif",
-  webp: "image/webp",
-};
 
 export function sanitizeFilename(name: string): string {
   let n = name;
@@ -756,7 +731,7 @@ packagesRouter.get("/api/files/:fileId/file", async (c) => {
       throw new HTTPException(404, { message: err instanceof Error ? err.message : "文件缺失" });
     }
   }
-  const mediaType = MEDIA_TYPES[f.format] ?? "application/octet-stream";
+  const mediaType = mediaTypeOf(f.format);
   return serveWithRange(c, path, mediaType);
 });
 

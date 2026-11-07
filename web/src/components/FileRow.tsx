@@ -1,5 +1,5 @@
+import { isReadableFormat } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail } from "@zzlibrary/shared";
-import { readableFormat } from "./ReaderOverlay";
 
 /** 格式图标的唯一出处（各页共用，勿再另建副本） */
 export const FORMAT_ICONS: Record<string, string> = {
@@ -35,7 +35,7 @@ export default function FileRow({
   onRead?: (f: FileDetail) => void;
   showProgress?: boolean;
 }) {
-  const readable = readableFormat(file.format);
+  const readable = isReadableFormat(file.format);
   const meta = metaText(file, showProgress);
 
   return (

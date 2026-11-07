@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@zzlibrary/core": "*",
     "@zzlibrary/shared": "*",
     "foliate-js": "^1.0.1",
     "jschardet": "^4.1.0",

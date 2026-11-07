@@ -94,7 +94,8 @@ export function createWebDavStore(opts: WebDavOptions): RemoteStore {
     },
     async putBytes(path, bytes) {
       await ensureDirs(path);
-      const res = await request(path, { method: "PUT", body: bytes });
+      // DOM 与 undici 两套 BodyInit 对 Uint8Array 泛型参数要求不一致（TS5.7+）；运行时两平台都接受任意 Uint8Array
+      const res = await request(path, { method: "PUT", body: bytes as unknown as never });
       if (res.status >= 400) throw new SyncTransportError("PUT 失败", path, res.status);
     },
     async head(path) {

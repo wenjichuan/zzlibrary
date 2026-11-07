@@ -3,7 +3,7 @@
  * 由**可读文件**的阅读进度聚合；读多写少，status 作为物化缓存存列上，
  * 仅在写入事件（写进度、包内文件增删、入库）时重算受影响的包。
  */
-import { KNOWN_FORMATS } from "./formats";
+import { isReadableFormat } from "./formats";
 
 export const READ_DONE_THRESHOLD = 98.0;
 
@@ -15,13 +15,13 @@ export interface StatusFileInput {
 
 /** 任一可读文件在读→在读；全部可读文件读完→已读；全未读→未读。
  *
- * 不可读格式（无阅读深度，如 zip/bin 等未知格式）中性，不参与聚合；
+ * 不可读格式（无阅读深度，如 zip/bin 等未知格式，及暂无内置阅览的 pptx/xlsx）中性，不参与聚合；
  * 无可读文件的包 status=""（界面显示「—」）。
  */
 export function computePackageStatus(files: StatusFileInput[]): string {
   const states: string[] = [];
   for (const f of files) {
-    if (!KNOWN_FORMATS.has(f.format)) continue;
+    if (!isReadableFormat(f.format)) continue;
     if (f.percent === null) states.push("未读");
     else if (f.percent >= READ_DONE_THRESHOLD) states.push("已读");
     else states.push("在读");

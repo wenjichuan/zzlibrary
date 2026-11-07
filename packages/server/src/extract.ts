@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { unzipSync } from "fflate";
 import jschardet from "jschardet";
-import { parseLooseDate, stemTitle } from "@zzlibrary/core";
+import { formatKind, parseLooseDate, stemTitle } from "@zzlibrary/core";
 
 export interface ExtractedMeta {
   title: string | null;
@@ -265,16 +265,13 @@ export function extractMeta(path: string, buffer: Buffer, filename: string, fmt:
         return extractPptx(path, filename);
       case "xlsx":
         return extractXlsx(path, filename);
-      case "jpg":
-      case "png":
-      case "gif":
-      case "webp":
-        return extractImage(path, filename);
-      default:
-        if (["mp4", "webm", "mov", "m4v", "mkv", "mp3", "m4a", "wav", "ogg", "flac"].includes(fmt)) {
-          return extractMedia(path, filename);
-        }
+      default: {
+        // 媒体/图片按注册表 kind 分派（core 格式注册表的唯一派生点）
+        const kind = formatKind(fmt);
+        if (kind === "image") return extractImage(path, filename);
+        if (kind === "audio" || kind === "video") return extractMedia(path, filename);
         return fallback(filename);
+      }
     }
   } catch {
     return fallback(filename);
