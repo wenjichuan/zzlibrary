@@ -32,6 +32,7 @@ import { join } from "node:path";
 import type { Settings } from "./config";
 import { isoFromSqlite, newUuid, nowSqlite } from "./db";
 import { recomputePackageStatus, syncCounts } from "./repo";
+import { pstmt } from "./db";
 
 interface FileRowFull {
   id: number;
@@ -110,7 +111,7 @@ export class SqliteSyncDevice implements LocalDevice {
     private db: DatabaseSync,
     private settings: Settings,
   ) {
-    const row = this.db.prepare("SELECT value FROM sync_state WHERE key = 'device_id'").get() as
+    const row = pstmt(this.db, "SELECT value FROM sync_state WHERE key = 'device_id'").get() as
       | { value: string }
       | undefined;
     if (row !== undefined) {
@@ -133,11 +134,11 @@ export class SqliteSyncDevice implements LocalDevice {
     this.pkgUuidToId.clear();
     this.catUuidToId.clear();
     this.pkgIdToUuid.clear();
-    for (const r of this.db.prepare("SELECT id, uuid FROM packages").all() as Array<{ id: number; uuid: string }>) {
+    for (const r of pstmt(this.db, "SELECT id, uuid FROM packages").all() as Array<{ id: number; uuid: string }>) {
       this.pkgUuidToId.set(r.uuid, r.id);
       this.pkgIdToUuid.set(r.id, r.uuid);
     }
-    for (const r of this.db.prepare("SELECT id, uuid FROM categories").all() as Array<{ id: number; uuid: string }>) {
+    for (const r of pstmt(this.db, "SELECT id, uuid FROM categories").all() as Array<{ id: number; uuid: string }>) {
       this.catUuidToId.set(r.uuid, r.id);
     }
   }
@@ -156,7 +157,7 @@ export class SqliteSyncDevice implements LocalDevice {
     changed: boolean;
   } {
     const path = manifestPath(env.kind, env.uuid);
-    const base = this.db.prepare("SELECT env FROM sync_baselines WHERE path = ?").get(path) as
+    const base = pstmt(this.db, "SELECT env FROM sync_baselines WHERE path = ?").get(path) as
       | { env: string }
       | undefined;
     const remote = env.data as Record<string, unknown>;
@@ -412,13 +413,13 @@ export class SqliteSyncDevice implements LocalDevice {
   }
 
   private applyCategory(env: ManifestEnvelope): ApplyOutcome {
-    const row = this.db.prepare("SELECT * FROM categories WHERE uuid = ?").get(env.uuid) as
+    const row = pstmt(this.db, "SELECT * FROM categories WHERE uuid = ?").get(env.uuid) as
       | { id: number; level: number; parent_id: number | null; name: string; sort_order: number; updated_at: string }
       | undefined;
     if (env.deleted) {
       if (row === undefined) return "noop";
       // 有子分类时不删（RESTRICT 语义）——子分类的墓碑稍后到达，下次同步重试本条
-      const child = this.db.prepare("SELECT id FROM categories WHERE parent_id = ? LIMIT 1").get(row.id);
+      const child = pstmt(this.db, "SELECT id FROM categories WHERE parent_id = ? LIMIT 1").get(row.id);
       if (child) throw new Error("分类仍有子分类，墓碑延后应用");
       // 连带：引用此分类的路径行强制删除（回退未分类语义由对端补路径行表达）
       const refs = this.db
@@ -428,8 +429,8 @@ export class SqliteSyncDevice implements LocalDevice {
         this.markDirty(ref.package_id);
         recordTombstone(this.db, "package-paths", ref.uuid);
       }
-      this.db.prepare("DELETE FROM package_paths WHERE l1_id = ? OR l2_id = ? OR l3_id = ?").run(row.id, row.id, row.id);
-      this.db.prepare("DELETE FROM categories WHERE id = ?").run(row.id);
+      pstmt(this.db, "DELETE FROM package_paths WHERE l1_id = ? OR l2_id = ? OR l3_id = ?").run(row.id, row.id, row.id);
+      pstmt(this.db, "DELETE FROM categories WHERE id = ?").run(row.id);
       this.catUuidToId.delete(env.uuid);
       recordTombstone(this.db, "categories", env.uuid, tombstoneRefs(env));
       return "tombstone-applied";
@@ -453,14 +454,14 @@ export class SqliteSyncDevice implements LocalDevice {
     const parentUuid =
       row.parent_id === null
         ? null
-        : ((this.db.prepare("SELECT uuid FROM categories WHERE id = ?").get(row.parent_id) as { uuid: string } | undefined)?.uuid ?? null);
+        : ((pstmt(this.db, "SELECT uuid FROM categories WHERE id = ?").get(row.parent_id) as { uuid: string } | undefined)?.uuid ?? null);
     const mergedData = this.merged(env, isoFromSqlite(row.updated_at), {
       level: row.level,
       parentUuid,
       name: row.name,
       sortOrder: row.sort_order,
       createdAt: this.iso(
-        (this.db.prepare("SELECT created_at FROM categories WHERE id = ?").get(row.id) as { created_at: string }).created_at,
+        (pstmt(this.db, "SELECT created_at FROM categories WHERE id = ?").get(row.id) as { created_at: string }).created_at,
       ) ?? "",
     }).data as unknown as CategoryData;
     this.db
@@ -479,7 +480,7 @@ export class SqliteSyncDevice implements LocalDevice {
       .get(data.scope, l2Id, l3Id) as { id: number; mode: string; params: string; updated_at: string } | undefined;
     if (env.deleted) {
       if (row === undefined) return "noop";
-      this.db.prepare("DELETE FROM segment_configs WHERE id = ?").run(row.id);
+      pstmt(this.db, "DELETE FROM segment_configs WHERE id = ?").run(row.id);
       return "tombstone-applied";
     }
     if (row === undefined) {
@@ -511,7 +512,7 @@ export class SqliteSyncDevice implements LocalDevice {
       const outcome = decideApply({ updatedAt: isoFromSqlite(row.updated_at), uuid: env.uuid }, env);
       if (outcome !== "tombstone-applied") return "local-newer"; // 本地删除后又编辑过 → 复活
       // 本地清库（行 + 文件 + 派生资产；物理文件留给磁盘清理）
-      this.db.prepare("DELETE FROM packages WHERE id = ?").run(row.id);
+      pstmt(this.db, "DELETE FROM packages WHERE id = ?").run(row.id);
       this.pkgUuidToId.delete(env.uuid);
       recordTombstone(this.db, "packages", env.uuid, tombstoneRefs(env));
       return "tombstone-applied";
@@ -570,12 +571,12 @@ export class SqliteSyncDevice implements LocalDevice {
     const data = env.data as PackagePathData;
     const pkgId = this.pkgUuidToId.get(data.packageUuid);
     if (pkgId === undefined) return "noop"; // 包不存在（墓碑先行）
-    const row = this.db.prepare("SELECT * FROM package_paths WHERE uuid = ?").get(env.uuid) as
+    const row = pstmt(this.db, "SELECT * FROM package_paths WHERE uuid = ?").get(env.uuid) as
       | { id: number; l1_id: number; l2_id: number | null; l3_id: number | null; updated_at: string }
       | undefined;
     if (env.deleted) {
       if (row === undefined) return "noop";
-      this.db.prepare("DELETE FROM package_paths WHERE id = ?").run(row.id);
+      pstmt(this.db, "DELETE FROM package_paths WHERE id = ?").run(row.id);
       this.markDirty(pkgId);
       recordTombstone(this.db, "package-paths", env.uuid, tombstoneRefs(env));
       return "tombstone-applied";
@@ -603,12 +604,12 @@ export class SqliteSyncDevice implements LocalDevice {
     const data = env.data as FileData;
     const pkgId = this.pkgUuidToId.get(data.packageUuid);
     if (pkgId === undefined) return "noop";
-    const row = this.db.prepare("SELECT * FROM files WHERE uuid = ?").get(env.uuid) as
+    const row = pstmt(this.db, "SELECT * FROM files WHERE uuid = ?").get(env.uuid) as
       | { id: number; name: string; format: string; file_size: number; page_count: number | null; sort_order: number; sha256: string | null; local: number; updated_at: string }
       | undefined;
     if (env.deleted) {
       if (row === undefined) return "noop";
-      this.db.prepare("DELETE FROM files WHERE id = ?").run(row.id);
+      pstmt(this.db, "DELETE FROM files WHERE id = ?").run(row.id);
       this.markDirty(pkgId);
       recordTombstone(this.db, "files", env.uuid, tombstoneRefs(env));
       return "tombstone-applied";
@@ -626,7 +627,7 @@ export class SqliteSyncDevice implements LocalDevice {
         )
         .run(pkgId, data.name, data.format, relPath, data.size, data.pageCount, data.sortOrder, data.sha256, this.fromIso(env.updatedAt), env.uuid);
       // file_path 先占位；取回时按真实 fileId 定名
-      this.db.prepare("UPDATE files SET file_path = ? WHERE id = ?").run(
+      pstmt(this.db, "UPDATE files SET file_path = ? WHERE id = ?").run(
         join("files", dirName, `${Number(ins.lastInsertRowid)}_${data.name}`),
         Number(ins.lastInsertRowid),
       );
@@ -652,7 +653,7 @@ export class SqliteSyncDevice implements LocalDevice {
   }
 
   private applyProgress(env: ManifestEnvelope): ApplyOutcome {
-    const file = this.db.prepare("SELECT id, package_id, uuid FROM files WHERE uuid = ?").get(env.uuid) as
+    const file = pstmt(this.db, "SELECT id, package_id, uuid FROM files WHERE uuid = ?").get(env.uuid) as
       | { id: number; package_id: number; uuid: string }
       | undefined;
     if (file === undefined) return "noop";
@@ -663,7 +664,7 @@ export class SqliteSyncDevice implements LocalDevice {
       if (existing === undefined) return "noop";
       // 重置墓碑按 LWW：本地读得更远（updated_at 更新）则保留本地进度
       if (env.updatedAt <= isoFromSqlite(existing.updated_at)) return "local-newer";
-      this.db.prepare("DELETE FROM reading_progress WHERE file_id = ?").run(file.id);
+      pstmt(this.db, "DELETE FROM reading_progress WHERE file_id = ?").run(file.id);
       this.markDirty(file.package_id);
       recordTombstone(this.db, "progress", env.uuid, tombstoneRefs(env));
       return "tombstone-applied";
@@ -692,7 +693,7 @@ export class SqliteSyncDevice implements LocalDevice {
 
   async getManifestCache(): Promise<Map<string, string>> {
     const m = new Map<string, string>();
-    for (const r of this.db.prepare("SELECT path, sha256 FROM sync_manifest_cache").all() as Array<{ path: string; sha256: string }>) {
+    for (const r of pstmt(this.db, "SELECT path, sha256 FROM sync_manifest_cache").all() as Array<{ path: string; sha256: string }>) {
       m.set(r.path, r.sha256);
     }
     return m;
@@ -701,7 +702,7 @@ export class SqliteSyncDevice implements LocalDevice {
     this.db.exec("BEGIN");
     try {
       this.db.exec("DELETE FROM sync_manifest_cache");
-      const ins = this.db.prepare("INSERT INTO sync_manifest_cache (path, sha256) VALUES (?, ?)");
+      const ins = pstmt(this.db, "INSERT INTO sync_manifest_cache (path, sha256) VALUES (?, ?)");
       for (const [path, sha] of entries) ins.run(path, sha);
       this.db.exec("COMMIT");
     } catch (err) {
@@ -710,7 +711,7 @@ export class SqliteSyncDevice implements LocalDevice {
     }
   }
   async getCollectionHashes(): Promise<Partial<Record<Collection, string>>> {
-    const row = this.db.prepare("SELECT value FROM sync_state WHERE key = 'col_hashes'").get() as
+    const row = pstmt(this.db, "SELECT value FROM sync_state WHERE key = 'col_hashes'").get() as
       | { value: string }
       | undefined;
     return row === undefined ? {} : (JSON.parse(row.value) as Partial<Record<Collection, string>>);
@@ -722,16 +723,16 @@ export class SqliteSyncDevice implements LocalDevice {
   }
   async getBlobCache(): Promise<Set<string>> {
     const s = new Set<string>();
-    for (const r of this.db.prepare("SELECT sha256 FROM sync_blob_cache").all() as Array<{ sha256: string }>) {
+    for (const r of pstmt(this.db, "SELECT sha256 FROM sync_blob_cache").all() as Array<{ sha256: string }>) {
       s.add(r.sha256);
     }
     return s;
   }
   async addBlobCache(hash: string): Promise<void> {
-    this.db.prepare("INSERT OR IGNORE INTO sync_blob_cache (sha256) VALUES (?)").run(hash);
+    pstmt(this.db, "INSERT OR IGNORE INTO sync_blob_cache (sha256) VALUES (?)").run(hash);
   }
   async getRevision(): Promise<number> {
-    const row = this.db.prepare("SELECT value FROM sync_state WHERE key = 'revision'").get() as
+    const row = pstmt(this.db, "SELECT value FROM sync_state WHERE key = 'revision'").get() as
       | { value: string }
       | undefined;
     return row === undefined ? 0 : Number(row.value);

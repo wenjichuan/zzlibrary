@@ -2,7 +2,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { HTTPException } from "hono/http-exception";
 import { computePackageStatus, displayDate } from "@zzlibrary/core";
-import { isoFromSqlite } from "./db";
+import { isoFromSqlite, pstmt } from "./db";
 import { getCategory, type CategoryRow } from "./deps";
 
 export interface FileRow {
@@ -78,7 +78,7 @@ export function loadPaths(db: DatabaseSync, packageId: number): PackagePathRow[]
 }
 
 export function getPackageFull(db: DatabaseSync, packageId: number): PackageFull | null {
-  const row = db.prepare("SELECT * FROM packages WHERE id = ?").get(packageId) as
+  const row = pstmt(db, "SELECT * FROM packages WHERE id = ?").get(packageId) as
     | PackageRow
     | undefined;
   if (!row) return null;
@@ -178,7 +178,7 @@ export function progressOut(p: ProgressRow | null | undefined): ProgressOutJson 
 }
 
 export function getProgress(db: DatabaseSync, fileId: number): ProgressRow | null {
-  return (db.prepare("SELECT * FROM reading_progress WHERE file_id = ?").get(fileId) as
+  return (pstmt(db, "SELECT * FROM reading_progress WHERE file_id = ?").get(fileId) as
     | ProgressRow
     | undefined) ?? null;
 }
@@ -208,7 +208,7 @@ export function recomputePackageStatus(db: DatabaseSync, packageId: number): voi
   const status = computePackageStatus(
     rows.map((r) => ({ format: r.format, percent: r.percent === null ? null : Number(r.percent) })),
   );
-  db.prepare("UPDATE packages SET status = ? WHERE id = ?").run(status, packageId);
+  pstmt(db, "UPDATE packages SET status = ? WHERE id = ?").run(status, packageId);
 }
 
 /** 冗余计数同步（文件增删后）。 */
@@ -216,7 +216,7 @@ export function syncCounts(db: DatabaseSync, packageId: number): void {
   const agg = db
     .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(file_size), 0) AS s FROM files WHERE package_id = ?")
     .get(packageId) as { n: number; s: number };
-  db.prepare("UPDATE packages SET file_count = ?, total_size = ? WHERE id = ?").run(
+  pstmt(db, "UPDATE packages SET file_count = ?, total_size = ? WHERE id = ?").run(
     agg.n,
     agg.s,
     packageId,
@@ -225,13 +225,35 @@ export function syncCounts(db: DatabaseSync, packageId: number): void {
 
 /** 启动对账：按当前规则重算所有包状态（幂等，返回变化数）。 */
 export function recomputeAllPackageStatuses(db: DatabaseSync): number {
-  const ids = db.prepare("SELECT id, status FROM packages").all() as Array<{ id: number; status: string }>;
+  const ids = pstmt(db, "SELECT id, status FROM packages").all() as Array<{ id: number; status: string }>;
   let changed = 0;
   for (const { id, status } of ids) {
     const before = status;
     recomputePackageStatus(db, id);
-    const after = (db.prepare("SELECT status FROM packages WHERE id = ?").get(id) as { status: string }).status;
+    const after = (pstmt(db, "SELECT status FROM packages WHERE id = ?").get(id) as { status: string }).status;
     if (after !== before) changed += 1;
   }
   return changed;
+}
+
+/** 批量装载多包的文件与路径（列表页避免每包 3 条查询的 N+1；单批 ≤100 个 id 直用 IN）。 */
+export function loadManyFull(db: DatabaseSync, rows: PackageRow[]): PackageFull[] {
+  if (rows.length === 0) return [];
+  const ph = rows.map(() => "?").join(",");
+  const ids = rows.map((r) => r.id);
+  const files = pstmt(db, `SELECT * FROM files WHERE package_id IN (${ph}) ORDER BY sort_order, id`).all(...ids) as FileRow[];
+  const paths = pstmt(db, `SELECT * FROM package_paths WHERE package_id IN (${ph}) ORDER BY id`).all(...ids) as PackagePathRow[];
+  const filesBy = new Map<number, FileRow[]>();
+  for (const f of files) {
+    const a = filesBy.get(f.package_id);
+    if (a) a.push(f);
+    else filesBy.set(f.package_id, [f]);
+  }
+  const pathsBy = new Map<number, PackagePathRow[]>();
+  for (const p of paths) {
+    const a = pathsBy.get(p.package_id);
+    if (a) a.push(p);
+    else pathsBy.set(p.package_id, [p]);
+  }
+  return rows.map((r) => ({ row: r, files: filesBy.get(r.id) ?? [], paths: pathsBy.get(r.id) ?? [] }));
 }

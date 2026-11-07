@@ -1,6 +1,6 @@
 /** 数据库（node:sqlite）：建表 DDL 与 SQLAlchemy create_all 产物兼容（存量 DB 直接可用），
  * 附 uuid 回填迁移（跨端同步契约的身份列）与包目录名迁移。 */
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { existsSync, readdirSync, renameSync, statSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS packages (
 );
 CREATE INDEX IF NOT EXISTS ix_packages_title ON packages (title);
 CREATE INDEX IF NOT EXISTS ix_packages_publish_date ON packages (publish_date);
+CREATE INDEX IF NOT EXISTS ix_packages_status ON packages (status);
 
 CREATE TABLE IF NOT EXISTS package_paths (
   id INTEGER NOT NULL PRIMARY KEY,
@@ -65,6 +66,9 @@ CREATE TABLE IF NOT EXISTS package_paths (
   CONSTRAINT uq_package_path UNIQUE (package_id, l1_id, l2_id, l3_id)
 );
 CREATE INDEX IF NOT EXISTS ix_package_paths_package_id ON package_paths (package_id);
+CREATE INDEX IF NOT EXISTS ix_package_paths_l1_id ON package_paths (l1_id);
+CREATE INDEX IF NOT EXISTS ix_package_paths_l2_id ON package_paths (l2_id);
+CREATE INDEX IF NOT EXISTS ix_package_paths_l3_id ON package_paths (l3_id);
 
 CREATE TABLE IF NOT EXISTS files (
   id INTEGER NOT NULL PRIMARY KEY,
@@ -141,6 +145,7 @@ export function migrate(db: DatabaseSync): void {
   addColumn(db, "package_paths", "updated_at", "DATETIME", backfill);
   addColumn(db, "categories", "updated_at", "DATETIME"); // 下方按 created_at 回填
   addColumn(db, "packages", "cover_sha256", "TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS ix_packages_cover_sha256 ON packages (cover_sha256)"); // 旧库列由上一行 ALTER 补齐后再建索引
   addColumn(db, "packages", "palette", "TEXT");
   addColumn(db, "segment_configs", "updated_at", "DATETIME", backfill);
   db.exec("UPDATE categories SET updated_at = COALESCE(updated_at, created_at)");
@@ -229,5 +234,37 @@ export function purgeStaleStaging(settings: Settings): void {
     } catch {
       continue;
     }
+  }
+}
+
+// ---------- 语句缓存与事务 ----------
+
+const stmtCache = new WeakMap<DatabaseSync, Map<string, StatementSync>>();
+
+/** 预编译语句缓存（node:sqlite 无内置缓存；按连接隔离）。热点路径用 pstmt 代替 db.prepare。 */
+export function pstmt(db: DatabaseSync, sql: string): StatementSync {
+  let m = stmtCache.get(db);
+  if (m === undefined) {
+    m = new Map();
+    stmtCache.set(db, m);
+  }
+  let s = m.get(sql);
+  if (s === undefined) {
+    s = db.prepare(sql);
+    m.set(sql, s);
+  }
+  return s;
+}
+
+/** 同步事务：包裹纯同步的 DB+fs 写段（段内绝不能 await——单连接下异步交错会钻进别人的事务）。 */
+export function inTransaction<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec("BEGIN");
+  try {
+    const r = fn();
+    db.exec("COMMIT");
+    return r;
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
   }
 }

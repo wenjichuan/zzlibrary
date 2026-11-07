@@ -18,18 +18,27 @@ interface CategoryOut {
   children: CategoryOut[];
 }
 
-function tree(db: Parameters<typeof getCategory>[0], parentId: number | null): CategoryOut[] {
-  const nodes = db
-    .prepare("SELECT * FROM categories WHERE parent_id IS ? ORDER BY sort_order, id")
-    .all(parentId) as CategoryRow[];
-  return nodes.map((n) => ({
-    id: n.id,
-    level: n.level,
-    parent_id: n.parent_id,
-    name: n.name,
-    sort_order: n.sort_order,
-    children: tree(db, n.id),
-  }));
+function tree(db: Parameters<typeof getCategory>[0], _parentId: number | null): CategoryOut[] {
+  // 一次全表读取内存建树：递归逐层查询在分类多时是每节点一条 SQL
+  const all = db
+    .prepare("SELECT * FROM categories ORDER BY sort_order, id")
+    .all() as CategoryRow[];
+  const byParent = new Map<number | null, CategoryRow[]>();
+  for (const n of all) {
+    const a = byParent.get(n.parent_id);
+    if (a) a.push(n);
+    else byParent.set(n.parent_id, [n]);
+  }
+  const build = (parentId: number | null): CategoryOut[] =>
+    (byParent.get(parentId) ?? []).map((n) => ({
+      id: n.id,
+      level: n.level,
+      parent_id: n.parent_id,
+      name: n.name,
+      sort_order: n.sort_order,
+      children: build(n.id),
+    }));
+  return build(null);
 }
 
 categoriesRouter.get("/api/categories", (c) => c.json(tree(c.get("db"), null)));

@@ -1,7 +1,7 @@
 /** 同步服务：云配置（data/cloud.json，凭据只存本地）、连接探测、
  * 立即同步（哈希回填 → pull → push，单飞）、释放本地空间、透明取回、
  * 写后自动同步（防抖排队）。 */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, createReadStream, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -48,6 +48,17 @@ function sha256Node(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** 流式文件哈希：GB 级文件按块读取，不再整读进内存。 */
+function sha256File(abs: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const h = createHash("sha256");
+    createReadStream(abs)
+      .on("data", (c) => h.update(c))
+      .on("end", () => resolve(h.digest("hex")))
+      .on("error", reject);
+  });
+}
+
 export class SyncService {
   private running = false;
   private queueTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,12 +75,18 @@ export class SyncService {
     return join(this.settings.dataDir, "cloud.json");
   }
 
+  private cfgCache: { mtimeMs: number; value: CloudConfig } | null = null;
+
   loadConfig(): CloudConfig | null {
     const p = this.configPath();
-    if (!existsSync(p)) return null;
     try {
-      return JSON.parse(readFileSync(p, "utf-8")) as CloudConfig;
+      const st = statSync(p); // 每次写操作都会读配置——按 mtime 缓存，省高频磁盘读
+      if (this.cfgCache !== null && this.cfgCache.mtimeMs === st.mtimeMs) return this.cfgCache.value;
+      const value = JSON.parse(readFileSync(p, "utf-8")) as CloudConfig;
+      this.cfgCache = { mtimeMs: st.mtimeMs, value };
+      return value;
     } catch {
+      this.cfgCache = null;
       return null;
     }
   }
@@ -98,8 +115,8 @@ export class SyncService {
     });
   }
 
-  /** 存量文件哈希回填（files.sha256 为空的本地文件；首次全量、其后增量）。 */
-  hashPendingFiles(limit = 5000): number {
+  /** 存量文件哈希回填（files.sha256 为空的本地文件；首次全量、其后增量）。流式哈希不整读大文件。 */
+  async hashPendingFiles(limit = 5000): Promise<number> {
     const rows = this.db
       .prepare("SELECT id, file_path FROM files WHERE sha256 IS NULL AND local = 1 LIMIT ?")
       .all(limit) as Array<{ id: number; file_path: string }>;
@@ -108,7 +125,7 @@ export class SyncService {
     for (const r of rows) {
       const abs = join(this.settings.dataDir, r.file_path);
       if (!existsSync(abs)) continue; // 缺失文件下次再试
-      upd.run(sha256Node(new Uint8Array(readFileSync(abs))), r.id);
+      upd.run(await sha256File(abs), r.id);
       hashed += 1;
     }
     return hashed;
@@ -127,7 +144,7 @@ export class SyncService {
     if (this.running) throw new Error("同步正在进行中");
     this.running = true;
     try {
-      this.hashPendingFiles();
+      await this.hashPendingFiles();
       const device = new SqliteSyncDevice(this.db, this.settings);
       const remote = this.createStore(config);
       const report = await fullSync(device, remote, { now: () => nowSqlite().replace(" ", "T") });
@@ -144,19 +161,30 @@ export class SyncService {
     }
   }
 
-  /** 写后自动同步：防抖 8 秒（配置了云且 autoSync 开启时生效）。
+  private lastAutoSyncAt = 0; // 自动同步最小间隔的锚点（手动「立即同步」不受限）
+
+  /** 写后自动同步：防抖 8 秒 + 相邻自动同步最小间隔 30 秒（配置了云且 autoSync 开启时生效）。
    * 失败自动重试：60 秒后补一次（网络恢复/云端恢复的场景）。 */
   queueLocalChange(): void {
     const config = this.loadConfig();
     if (config === null || !config.autoSync) return;
     if (this.queueTimer !== null) clearTimeout(this.queueTimer);
-    this.queueTimer = setTimeout(() => {
+    const fire = () => {
       this.queueTimer = null;
+      const wait = this.lastAutoSyncAt + 30_000 - Date.now();
+      if (wait > 0) {
+        // 距上次同步太近：顺延（阅读进度这类高频写不再逐次触发全量同步）
+        this.queueTimer = setTimeout(fire, wait);
+        this.queueTimer.unref?.();
+        return;
+      }
+      this.lastAutoSyncAt = Date.now();
       this.runSync().catch((err) => {
         console.error("自动同步失败：", err instanceof Error ? err.message : err);
         this.scheduleRetry();
       });
-    }, 8000);
+    };
+    this.queueTimer = setTimeout(fire, 8000);
     this.queueTimer.unref?.(); // 不阻止进程退出（测试/关机场景）
   }
 
@@ -206,11 +234,9 @@ export class SyncService {
         return { ok: false, reason: `「${f.name}」尚未完成哈希登记，请先「立即同步」一次再释放` };
       }
     }
-    const cache = new Set(
-      (this.db.prepare("SELECT sha256 FROM sync_blob_cache").all() as Array<{ sha256: string }>).map((r) => r.sha256),
-    );
+    const cache = this.db.prepare("SELECT 1 FROM sync_blob_cache WHERE sha256 = ?"); // 点查（主键索引），不整表载入
     for (const f of local) {
-      if (!cache.has(f.sha256!)) {
+      if (cache.get(f.sha256!) === undefined) {
         return { ok: false, reason: `「${f.name}」的内容尚未确认在云端，请先「立即同步」再释放` };
       }
     }

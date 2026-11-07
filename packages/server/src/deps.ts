@@ -1,6 +1,7 @@
 /** 路由公共依赖与校验工具（自 Python deps.py 平移）。 */
 import type { DatabaseSync } from "node:sqlite";
 import { HTTPException } from "hono/http-exception";
+import { pstmt } from "./db";
 
 export interface CategoryRow {
   id: number;
@@ -15,7 +16,7 @@ export interface CategoryRow {
 
 export function getCategory(db: DatabaseSync, cid: number | null | undefined): CategoryRow | null {
   if (cid === null || cid === undefined) return null;
-  return (db.prepare("SELECT * FROM categories WHERE id = ?").get(cid) as CategoryRow) ?? null;
+  return (pstmt(db, "SELECT * FROM categories WHERE id = ?").get(cid) as CategoryRow) ?? null;
 }
 
 /** 校验并推导分类链：l3 必须属于 l2，l2 必须属于 l1；给出下级时自动补全上级。 */

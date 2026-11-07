@@ -95,29 +95,37 @@ export function createApp(settings = new Settings()): Hono<Env> {
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
-  // 生产模式：Web 静态资源 + SPA 深链回退
+  // 生产模式：Web 静态资源 + SPA 深链回退（资源文件名带哈希，进程内缓存即可——每请求 readFileSync 是纯浪费）
   const dist = join(settings.dataDir, "..", "web", "dist");
   const distIndex = join(dist, "index.html");
   if (existsSync(distIndex)) {
+    const indexHtml = readFileSync(distIndex, "utf-8");
+    const assetCache = new Map<string, { body: Buffer; type: string }>();
+    const asset = (path: string) => {
+      let hit = assetCache.get(path);
+      if (hit === undefined) {
+        const filePath = join(dist, path.slice(1));
+        if (!existsSync(filePath)) return null;
+        const type = path.endsWith(".js") || path.endsWith(".mjs")
+          ? "text/javascript"
+          : path.endsWith(".css")
+            ? "text/css"
+            : "application/octet-stream";
+        hit = { body: readFileSync(filePath), type };
+        assetCache.set(path, hit);
+      }
+      return hit;
+    };
     app.get("*", (c) => {
       const url = new URL(c.req.url);
       const path = url.pathname;
       if (path.startsWith("/api")) return c.json({ detail: "Not Found" }, 404);
       if (path.startsWith("/assets/")) {
-        const filePath = join(dist, path.slice(1));
-        if (existsSync(filePath)) {
-          const ext = path.endsWith(".js") || path.endsWith(".mjs")
-            ? "text/javascript"
-            : path.endsWith(".css")
-              ? "text/css"
-              : "application/octet-stream";
-          return c.body(readFileSync(filePath) as unknown as ReadableStream, 200, {
-            "Content-Type": ext,
-          });
-        }
-        return c.json({ detail: "Not Found" }, 404);
+        const hit = asset(path);
+        if (hit === null) return c.json({ detail: "Not Found" }, 404);
+        return c.body(hit.body as unknown as ReadableStream, 200, { "Content-Type": hit.type });
       }
-      return c.html(readFileSync(distIndex, "utf-8"));
+      return c.html(indexHtml);
     });
   }
 

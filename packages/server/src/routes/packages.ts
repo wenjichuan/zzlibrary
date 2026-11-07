@@ -23,6 +23,7 @@ import {
   getPackageFull,
   getPackageOr404,
   loadFiles,
+  loadManyFull,
   packageOut,
   progressOut,
   getProgress,
@@ -30,8 +31,9 @@ import {
   syncCounts,
   type FileRow,
   type PackageFull,
+  type PackageRow,
 } from "../repo";
-import { nowSqlite } from "../db";
+import { inTransaction, nowSqlite } from "../db";
 import { extractMeta } from "../extract";
 import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
 import { recordPackageTombstones, recordTombstone } from "../sync-device";
@@ -236,60 +238,63 @@ packagesRouter.post("/api/packages", async (c) => {
   const resolvedPaths = resolvePaths(db, meta.classifications);
   const publishDate = parseDateField(meta.publish_date);
 
-  const ins = db
-    .prepare(
-      "INSERT INTO packages (title, authors, publish_date, publisher, tags, notes, status, file_count, total_size, created_at, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)",
-    )
-    .run(
-      title,
-      JSON.stringify(cleanList(meta.authors)),
-      publishDate,
-      (meta.publisher ?? "").trim() || null,
-      JSON.stringify(cleanList(meta.tags)),
-      meta.notes ?? null,
-      "未读",
-      nowSqlite(),
-      nowSqlite(),
-      randomUUID().replaceAll("-", ""),
-    );
-  const pkgId = Number(ins.lastInsertRowid);
-  const insertPath = db.prepare(
-    "INSERT INTO package_paths (package_id, l1_id, l2_id, l3_id, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?)",
-  );
-  for (const [l1, l2, l3] of resolvedPaths) {
-    insertPath.run(pkgId, l1, l2, l3, nowSqlite(), randomUUID().replaceAll("-", ""));
-  }
-
-  let packageCover: Buffer | null = null;
-  const pkg = getPackageFull(db, pkgId)!;
-  const pkgDir = packageDir(settings, pkg);
-  mkdirSync(pkgDir, { recursive: true });
-  let order = 0;
-  for (const { dir, info } of staged) {
-    const stagedBytes = readFileSync(join(dir, "file"));
-    const f = db
+  const { pkgId, packageCover } = inTransaction(db, () => {
+    const ins = db
       .prepare(
-        "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
+        "INSERT INTO packages (title, authors, publish_date, publisher, tags, notes, status, file_count, total_size, created_at, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)",
       )
-      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
-    const fileId = Number(f.lastInsertRowid);
-    const dest = join(pkgDir, `${fileId}_${info.filename}`);
-    renameSync(join(dir, "file"), dest);
-    db.prepare("UPDATE files SET file_path = ? WHERE id = ?").run(
-      join("files", ...dest.slice(settings.filesDir.length + 1).split(/[\\/]/)), fileId,
+      .run(
+        title,
+        JSON.stringify(cleanList(meta.authors)),
+        publishDate,
+        (meta.publisher ?? "").trim() || null,
+        JSON.stringify(cleanList(meta.tags)),
+        meta.notes ?? null,
+        "未读",
+        nowSqlite(),
+        nowSqlite(),
+        randomUUID().replaceAll("-", ""),
+      );
+    const pkgId = Number(ins.lastInsertRowid);
+    const insertPath = db.prepare(
+      "INSERT INTO package_paths (package_id, l1_id, l2_id, l3_id, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    const coverSrc = join(dir, "cover.png");
-    if (existsSync(coverSrc)) {
-      const coverImg = readFileSync(coverSrc);
-      mkdirSync(join(settings.artDir, "filecovers"), { recursive: true });
-      writeFileSync(join(settings.artDir, "filecovers", `${fileId}.png`), coverImg);
-      if (packageCover === null) packageCover = coverImg;
+    for (const [l1, l2, l3] of resolvedPaths) {
+      insertPath.run(pkgId, l1, l2, l3, nowSqlite(), randomUUID().replaceAll("-", ""));
     }
-    order += 1;
-  }
 
-  syncCounts(db, pkgId);
-  recomputePackageStatus(db, pkgId); // 入库即对齐：纯不可读格式包为中性 ""
+    let packageCover: Buffer | null = null;
+    const pkg = getPackageFull(db, pkgId)!;
+    const pkgDir = packageDir(settings, pkg);
+    mkdirSync(pkgDir, { recursive: true });
+    let order = 0;
+    for (const { dir, info } of staged) {
+      const stagedBytes = readFileSync(join(dir, "file"));
+      const f = db
+        .prepare(
+          "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
+        )
+        .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
+      const fileId = Number(f.lastInsertRowid);
+      const dest = join(pkgDir, `${fileId}_${info.filename}`);
+      renameSync(join(dir, "file"), dest);
+      db.prepare("UPDATE files SET file_path = ? WHERE id = ?").run(
+        join("files", ...dest.slice(settings.filesDir.length + 1).split(/[\\/]/)), fileId,
+      );
+      const coverSrc = join(dir, "cover.png");
+      if (existsSync(coverSrc)) {
+        const coverImg = readFileSync(coverSrc);
+        mkdirSync(join(settings.artDir, "filecovers"), { recursive: true });
+        writeFileSync(join(settings.artDir, "filecovers", `${fileId}.png`), coverImg);
+        if (packageCover === null) packageCover = coverImg;
+      }
+      order += 1;
+    }
+
+    syncCounts(db, pkgId);
+    recomputePackageStatus(db, pkgId); // 入库即对齐：纯不可读格式包为中性 ""
+    return { pkgId, packageCover };
+  });
   await regeneratePackageArt(settings.artDir, pkgId, title, packageCover);
   const palette = await paletteFromCover(packageCover, title);
   db.prepare("UPDATE packages SET palette = ?, cover_sha256 = ? WHERE id = ?").run(
@@ -387,10 +392,11 @@ packagesRouter.get("/api/packages", (c) => {
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM packages ${where}`).get(...params) as { n: number }).n;
   const rows = db
     .prepare(`SELECT * FROM packages ${where} ORDER BY ${order}, packages.id DESC LIMIT ? OFFSET ?`)
-    .all(...params, pageSize, (page - 1) * pageSize) as Array<{ id: number }>;
+    .all(...params, pageSize, (page - 1) * pageSize) as PackageRow[];
 
   const catCache = new Map();
-  const items = rows.map((r) => packageOut(db, getPackageFull(db, r.id)!, catCache));
+  // 批量装载本页包的文件与路径：每包 3 条查询的 N+1 → 两条 IN 查询
+  const items = loadManyFull(db, rows).map((p) => packageOut(db, p, catCache));
   return c.json({ total, page, page_size: pageSize, items });
 });
 
@@ -485,8 +491,10 @@ packagesRouter.delete("/api/packages/:id", (c) => {
     const fc = fileCoverPath(settings, f);
     if (existsSync(fc)) unlinkSync(fc);
   }
-  recordPackageTombstones(db, pkg);
-  db.prepare("DELETE FROM packages WHERE id = ?").run(pkg.row.id);
+  inTransaction(db, () => {
+    recordPackageTombstones(db, pkg);
+    db.prepare("DELETE FROM packages WHERE id = ?").run(pkg.row.id);
+  });
   c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });
@@ -512,31 +520,34 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
 
   const maxOrder = pkg.files.reduce((m, f) => Math.max(m, f.sort_order), -1);
   const stagedBytes = readFileSync(join(stagingDir, "file"));
-  const ins = db
-    .prepare(
-      "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
-    )
-    .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
-  const fileId = Number(ins.lastInsertRowid);
-  const dir = packageDir(settings, pkg);
-  mkdirSync(dir, { recursive: true });
-  const dest = join(dir, `${fileId}_${info.filename}`);
-  renameSync(join(stagingDir, "file"), dest);
-  db.prepare("UPDATE files SET file_path = ? WHERE id = ?").run(
-    join("files", ...dest.slice(settings.filesDir.length + 1).split(/[\\/]/)),
-    fileId,
-  );
+  const { fileId, coverImg } = inTransaction(db, () => {
+    const ins = db
+      .prepare(
+        "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
+      )
+      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, sha256Of(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
+    const fileId = Number(ins.lastInsertRowid);
+    const dir = packageDir(settings, pkg);
+    mkdirSync(dir, { recursive: true });
+    const dest = join(dir, `${fileId}_${info.filename}`);
+    renameSync(join(stagingDir, "file"), dest);
+    db.prepare("UPDATE files SET file_path = ? WHERE id = ?").run(
+      join("files", ...dest.slice(settings.filesDir.length + 1).split(/[\\/]/)),
+      fileId,
+    );
 
-  let coverImg: Buffer | null = null;
-  const coverSrc = join(stagingDir, "cover.png");
-  if (existsSync(coverSrc)) {
-    coverImg = readFileSync(coverSrc);
-    mkdirSync(join(settings.artDir, "filecovers"), { recursive: true });
-    writeFileSync(join(settings.artDir, "filecovers", `${fileId}.png`), coverImg);
-  }
+    let coverImg: Buffer | null = null;
+    const coverSrc = join(stagingDir, "cover.png");
+    if (existsSync(coverSrc)) {
+      coverImg = readFileSync(coverSrc);
+      mkdirSync(join(settings.artDir, "filecovers"), { recursive: true });
+      writeFileSync(join(settings.artDir, "filecovers", `${fileId}.png`), coverImg);
+    }
 
-  syncCounts(db, pkgId);
-  recomputePackageStatus(db, pkgId); // 增文件改变"全部读完"口径
+    syncCounts(db, pkgId);
+    recomputePackageStatus(db, pkgId); // 增文件改变"全部读完"口径
+    return { fileId, coverImg };
+  });
   // 包封面缺失时用新文件封面补上
   if (coverImg !== null && !existsSync(join(settings.artDir, "covers", `${pkgId}.png`))) {
     await regeneratePackageArt(settings.artDir, pkgId, pkg.row.title, coverImg);
