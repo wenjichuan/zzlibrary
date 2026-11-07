@@ -468,16 +468,16 @@ function EditModal({
         onSaved(null);
         return;
       }
-      for (const f of removedFiles) {
-        await api.deletePackageFile(detail.id, f.id);
-      }
-      for (const a of pendingAdds) {
-        await api.addPackageFile(detail.id, a.stageId);
-      }
+      // 文件增删一次批量请求（事务内原子完成，无「部分生效」中间态）
+      const afterFiles = await api.applyPackageFiles(
+        detail.id,
+        removedFiles.map((f) => f.id),
+        pendingAdds.map((a) => a.stageId),
+      );
       setPendingAdds([]); // 已入包，暂存被后端清除
       const fresh = await api.updatePackage(detail.id, metaToInput({ ...form, title }));
       push("success", "已保存");
-      onSaved(fresh);
+      onSaved(fresh.id === afterFiles.id ? fresh : afterFiles);
     } catch (err) {
       push("error", err instanceof Error ? err.message : "保存失败（部分改动可能已生效，请重试）");
       discardPending(); // 未入包的暂存立即废弃，避免残留

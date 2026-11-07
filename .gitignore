@@ -48,3 +48,4 @@ Thumbs.db
 .drill-b.mjs
 .drill-data-b/
 .verify-restore/
+.e2e-stress-100k/

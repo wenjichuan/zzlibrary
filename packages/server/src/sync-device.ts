@@ -892,7 +892,8 @@ export class SqliteSyncDevice implements LocalDevice {
     return s;
   }
   async addBlobCache(hash: string): Promise<void> {
-    pstmt(this.db, "INSERT OR IGNORE INTO sync_blob_cache (sha256) VALUES (?)").run(hash);
+    this.blobCacheBuf.push(hash);
+    if (this.blobCacheBuf.length >= 500) this.flushPendingWrites();
   }
   async getRevision(): Promise<number> {
     const row = pstmt(this.db, "SELECT value FROM sync_state WHERE key = 'revision'").get() as
@@ -905,10 +906,23 @@ export class SqliteSyncDevice implements LocalDevice {
       .prepare("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('revision', ?)")
       .run(String(revision));
   }
+  /** 基线/块缓存写缓冲：万包首推不再每条一个 fsync 小事务；满 500 或同步结束时批量落盘。 */
+  private baselineBuf: Array<[string, string]> = [];
+  private blobCacheBuf: string[] = [];
   noteBaseline(path: string, env: ManifestEnvelope): void {
-    this.db
-      .prepare("INSERT OR REPLACE INTO sync_baselines (path, env) VALUES (?, ?)")
-      .run(path, manifestText(env));
+    this.baselineBuf.push([path, manifestText(env)]);
+    if (this.baselineBuf.length >= 500) this.flushPendingWrites();
+  }
+  /** 冲刷缓冲的基线/块缓存写（单事务）。引擎在同步收尾调用；未冲掉的部分是缓存，进程崩溃可自愈（下次 pull 重建）。 */
+  flushPendingWrites(): void {
+    inTransaction(this.db, () => {
+      const insB = pstmt(this.db, "INSERT OR REPLACE INTO sync_baselines (path, env) VALUES (?, ?)");
+      for (const [p, e] of this.baselineBuf) insB.run(p, e);
+      const insC = pstmt(this.db, "INSERT OR IGNORE INTO sync_blob_cache (sha256) VALUES (?)");
+      for (const h of this.blobCacheBuf) insC.run(h);
+    });
+    this.baselineBuf = [];
+    this.blobCacheBuf = [];
   }
 }
 

@@ -315,8 +315,9 @@ export class SyncService {
     await this.runSync();
 
     const cutoffMs = Date.now() - retentionDays * 86400_000;
+    // 只取墓碑基线（确定性序列化里 "deleted":true 可作判别子串）——不再全量载入/解析 baselines（万包数百 MB 峰值 → 仅墓碑行）
     const baselineRows = this.db
-      .prepare("SELECT path, env FROM sync_baselines")
+      .prepare("SELECT path, env FROM sync_baselines WHERE env LIKE '%\"deleted\":true%'")
       .all() as Array<{ path: string; env: string }>;
 
     // 1) 内容块孤儿清理（候选=全部墓碑携带的 blobRefs；先于墓碑清理执行）
@@ -324,29 +325,29 @@ export class SyncService {
       deleted?: boolean; updatedAt?: string; kind?: string;
       data?: { sha256?: unknown; coverSha256?: unknown; blobRefs?: unknown };
     }
-    const parsed = new Array<TombEnv | null>(baselineRows.length);
-    baselineRows.forEach((row, i) => {
+    const parsed: Array<{ path: string; env: TombEnv | null }> = baselineRows.map((row) => {
       try {
-        parsed[i] = JSON.parse(row.env) as TombEnv;
+        return { path: row.path, env: JSON.parse(row.env) as TombEnv };
       } catch {
-        parsed[i] = null;
+        return { path: row.path, env: null };
       }
     });
-    // 引用集合：本地活文件 + 活清单引用
-    const refs = new Set<string>();
+    // 本地活文件引用集合
+    const localRefs = new Set<string>();
     for (const r of this.db
       .prepare("SELECT sha256 FROM files WHERE sha256 IS NOT NULL")
       .all() as Array<{ sha256: string }>) {
-      refs.add(r.sha256);
+      localRefs.add(r.sha256);
     }
-    for (const env of parsed) {
-      if (env === null || env.deleted === true) continue;
-      if (env.kind === "files" && typeof env.data?.sha256 === "string") refs.add(env.data.sha256);
-      if (env.kind === "packages" && typeof env.data?.coverSha256 === "string") refs.add(env.data.coverSha256);
-    }
+    // 活基线引用判别（按候选逐个点查：非墓碑行里含带引号的完整 sha）
+    const liveRefStmt = this.db.prepare(
+      "SELECT 1 FROM sync_baselines WHERE env LIKE ? AND env NOT LIKE '%\"deleted\":true%' LIMIT 1",
+    );
+    const referencedByLive = (sha: string): boolean => localRefs.has(sha) || liveRefStmt.get(`%"${sha}"%`) !== undefined;
+
     // 候选集合：墓碑 blobRefs（去重，带 size）
     const candidates = new Map<string, number>();
-    for (const env of parsed) {
+    for (const { env } of parsed) {
       if (env === null || env.deleted !== true || !Array.isArray(env.data?.blobRefs)) continue;
       for (const r of env.data.blobRefs as unknown[]) {
         const sha = (r as { sha256?: unknown })?.sha256;
@@ -357,7 +358,7 @@ export class SyncService {
       }
     }
     for (const [sha256, size] of candidates) {
-      if (refs.has(sha256)) {
+      if (referencedByLive(sha256)) {
         report.blobsSkippedReferenced += 1; // 仍被引用（共享/复活）——墓碑保留，下轮再看
         continue;
       }
@@ -371,15 +372,14 @@ export class SyncService {
       }
     }
 
-    // 2) 过期墓碑清理
+    // 2) 过期墓碑清理（parsed 本就只含墓碑行）
     const expiredPaths: string[] = [];
-    baselineRows.forEach((row, i) => {
-      const env: TombEnv | null | undefined = parsed[i];
-      if (env == null || env.deleted !== true) return;
+    for (const { path, env } of parsed) {
+      if (env === null || env.deleted !== true) continue;
       const t = String(env.updatedAt ?? "");
       const ms = Date.parse(t.endsWith("Z") ? t : t + "Z"); // 无 Z 的也是 UTC
-      if (!Number.isNaN(ms) && ms < cutoffMs) expiredPaths.push(row.path);
-    });
+      if (!Number.isNaN(ms) && ms < cutoffMs) expiredPaths.push(path);
+    }
     if (expiredPaths.length > 0) {
       const libText = await remote.getText(LIBRARY_INDEX_PATH);
       if (libText === null) throw new Error("云端没有 library.json（数据异常）");

@@ -5,13 +5,14 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
@@ -33,7 +34,7 @@ import {
   type PackageFull,
   type PackageRow,
 } from "../repo";
-import { inTransaction, nowSqlite } from "../db";
+import { inTransaction, nowSqlite, pstmt } from "../db";
 import { sha256Sync } from "../hashing";
 import { extractMeta } from "../extract";
 import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
@@ -68,6 +69,14 @@ function packageDetail(
   pkg: PackageFull,
 ) {
   const base = packageOut(db, pkg, new Map());
+  // 文件存在性探测：两次 readdir 代替每文件两次 existsSync（百文件包 = 200 次 stat → 2 次目录读）
+  const coverNames = new Set(safeReaddir(join(settings.artDir, "filecovers")));
+  const pkgDirSet = new Set<string>();
+  const firstPath = pkg.files[0]?.file_path;
+  if (firstPath !== undefined) {
+    const dir = dirname(join(settings.dataDir, firstPath));
+    for (const name of safeReaddir(dir)) pkgDirSet.add(name);
+  }
   return {
     ...base,
     has_real_cover: pkg.row.cover_sha256 !== null,
@@ -78,11 +87,19 @@ function packageDetail(
       file_size: f.file_size,
       page_count: f.page_count,
       sort_order: f.sort_order,
-      has_cover: existsSync(fileCoverPath(settings, f)),
-      local: f.local === 1 && existsSync(join(settings.dataDir, f.file_path)),
+      has_cover: coverNames.has(`${f.id}.png`),
+      local: f.local === 1 && pkgDirSet.has(basename(f.file_path)),
       progress: progressOut(getProgress(db, f.id)),
     })),
   };
+}
+
+function safeReaddir(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
 }
 
 // ---------- 入库两步：stage -> commit ----------
@@ -350,9 +367,17 @@ packagesRouter.get("/api/packages", (c) => {
   const q = c.req.query("q");
   if (q) {
     if (q.length > 200) throw new HTTPException(422, { message: "q 最长 200" });
-    const like = `%${q.trim()}%`;
-    conds.push("(packages.title LIKE ? OR packages.authors LIKE ? OR packages.publisher LIKE ? OR packages.notes LIKE ? OR packages.tags LIKE ?)");
-    params.push(like, like, like, like, like);
+    const needle = q.trim();
+    if (needle.length >= 3) {
+      // ≥3 字走 trigram FTS（倒排索引，子串语义与 LIKE 等价且支持中文分词）
+      const match = `"${needle.replaceAll('"', '""')}"`;
+      conds.push("packages.id IN (SELECT rowid FROM packages_fts WHERE packages_fts MATCH ?)");
+      params.push(match);
+    } else {
+      const like = `%${needle}%`;
+      conds.push("(packages.title LIKE ? OR packages.authors LIKE ? OR packages.publisher LIKE ? OR packages.notes LIKE ? OR packages.tags LIKE ?)");
+      params.push(like, like, like, like, like);
+    }
   }
 
   const orderMap: Record<string, string> = {
@@ -576,6 +601,92 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
     },
     201,
   );
+});
+
+/** 批量文件编辑（编辑弹窗保存）：一次请求完成全部移除+新增——替代逐文件串行 N 次往返与「部分生效」中间态。 */
+packagesRouter.post("/api/packages/:id/files/batch", async (c) => {
+  const db = c.get("db");
+  const settings = c.get("settings");
+  const pkgId = Number(c.req.param("id"));
+  const pkg = getPackageOr404(db, pkgId);
+  const payload = await c.req
+    .json<{ remove_ids?: number[]; add_stage_ids?: string[] }>()
+    .catch(() => ({}) as never);
+  const removeIds = (payload.remove_ids ?? []).filter((n) => Number.isInteger(n));
+  const addStageIds = (payload.add_stage_ids ?? []).filter((s) => typeof s === "string" && s !== "");
+  if (removeIds.length + addStageIds.length === 0) {
+    throw new HTTPException(422, { message: "没有任何变更" });
+  }
+  // 校验移除目标属于本包；清空守卫与单删一致（移除至空包=删整包，走 DELETE 端点）
+  const removeSet = new Set(removeIds);
+  for (const id of removeIds) {
+    if (!pkg.files.some((f) => f.id === id)) throw new HTTPException(404, { message: `文件 ${id} 不在该包内` });
+  }
+  if (pkg.files.length - removeSet.size + addStageIds.length === 0) {
+    throw new HTTPException(422, { message: "不能移除全部文件（保存将删除整个资料包请走整包删除）" });
+  }
+  // 预读暂存信息（缺失/过期直接 404，不动库）
+  const staged: Array<{ dir: string; filename: string; format: string; size: number; pageCount: number | null }> = [];
+  for (const sid of addStageIds) {
+    const dir = join(settings.stagingDir, sid);
+    if (!existsSync(join(dir, "file"))) {
+      throw new HTTPException(404, { message: `暂存文件已过期（${sid.slice(0, 8)}…），请重新上传` });
+    }
+    const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8")) as {
+      filename: string; format: string; size: number; page_count: number | null;
+    };
+    staged.push({ dir, filename: meta.filename, format: meta.format, size: meta.size, pageCount: meta.page_count });
+  }
+
+  const dir = packageDir(settings, pkg);
+  mkdirSync(dir, { recursive: true });
+  const result = inTransaction(db, () => {
+    // 移除（含封面缓存清理）
+    const delFile = pstmt(db, "DELETE FROM files WHERE id = ?");
+    for (const f of pkg.files) {
+      if (!removeSet.has(f.id)) continue;
+      delFile.run(f.id);
+      const fc = fileCoverPath(settings, f);
+      if (existsSync(fc)) unlinkSync(fc);
+    }
+    // 新增（sha/落位/文件封面与单加一致）
+    let order = pkg.files.reduce((m, f) => Math.max(m, f.sort_order), -1);
+    let firstCover: Buffer | null = null;
+    for (const s of staged) {
+      order += 1;
+      const bytes = readFileSync(join(s.dir, "file"));
+      const ins = pstmt(db, "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)").run(
+        pkgId, s.filename, s.format, s.size, s.pageCount, order, sha256Sync(new Uint8Array(bytes)), nowSqlite(), randomUUID().replaceAll("-", ""),
+      );
+      const fileId = Number(ins.lastInsertRowid);
+      const dest = join(dir, `${fileId}_${s.filename}`);
+      renameSync(join(s.dir, "file"), dest);
+      pstmt(db, "UPDATE files SET file_path = ? WHERE id = ?").run(
+        join("files", ...dest.slice(settings.filesDir.length + 1).split(/[\\/]/)), fileId,
+      );
+      const coverSrc = join(s.dir, "cover.png");
+      if (existsSync(coverSrc)) {
+        const img = readFileSync(coverSrc);
+        mkdirSync(join(settings.artDir, "filecovers"), { recursive: true });
+        writeFileSync(join(settings.artDir, "filecovers", `${fileId}.png`), img);
+        if (firstCover === null) firstCover = img;
+      }
+    }
+    syncCounts(db, pkgId);
+    recomputePackageStatus(db, pkgId);
+    return { firstCover };
+  });
+  // 包封面缺失时用新文件封面补上（与单加一致）
+  if (result.firstCover !== null && !existsSync(join(settings.artDir, "covers", `${pkgId}.png`))) {
+    await regeneratePackageArt(settings.artDir, pkgId, pkg.row.title, result.firstCover);
+    const palette = await paletteFromCover(result.firstCover, pkg.row.title);
+    db.prepare("UPDATE packages SET palette = ?, cover_sha256 = ? WHERE id = ?").run(
+      JSON.stringify(palette), sha256Sync(new Uint8Array(result.firstCover)), pkgId,
+    );
+  }
+  for (const s of staged) rmSync(s.dir, { recursive: true, force: true });
+  c.get("sync").queueLocalChange();
+  return c.json(packageDetail(settings, db, getPackageOr404(db, pkgId)));
 });
 
 packagesRouter.patch("/api/packages/:id/files/:fileId", async (c) => {

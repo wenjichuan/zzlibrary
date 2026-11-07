@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS packages (
 );
 CREATE INDEX IF NOT EXISTS ix_packages_title ON packages (title);
 CREATE INDEX IF NOT EXISTS ix_packages_publish_date ON packages (publish_date);
+CREATE INDEX IF NOT EXISTS ix_packages_created_id ON packages (created_at, id); -- 「最新入库」排序免全表扫+排序（深翻页也不走临时排序）
 CREATE INDEX IF NOT EXISTS ix_packages_status ON packages (status);
 
 CREATE TABLE IF NOT EXISTS package_paths (
@@ -105,6 +106,9 @@ CREATE TABLE IF NOT EXISTS reading_progress (
 export function openDb(dbPath: string): DatabaseSync {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode=WAL");
+  // WAL 下 NORMAL 的崩溃语义：最多丢最后一个事务、库文件绝不损坏（SQLite 官方推荐搭配）。
+  // 个人库丢一条进度有云端同步兜底，换来的是高频小写不再逐事务 fsync。
+  db.exec("PRAGMA synchronous=NORMAL");
   db.exec("PRAGMA foreign_keys=ON");
   return db;
 }
@@ -184,6 +188,33 @@ CREATE INDEX IF NOT EXISTS ix_files_sha256 ON files (sha256);
   addColumn(db, "sync_tombstones", "blob_refs", "TEXT");
   // 移除短暂的本地 GC 记账表（方案改为云端墓碑记账）
   db.exec("DROP TABLE IF EXISTS sync_gc_pending");
+  // 全文搜索（trigram 分词：支持中文子串；≥3 字查询走 FTS，短查询回退 LIKE）
+  db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(
+  title, authors, publisher, tags, notes,
+  content='packages', content_rowid='id', tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS trg_packages_fts_ai AFTER INSERT ON packages BEGIN
+  INSERT INTO packages_fts(rowid, title, authors, publisher, tags, notes)
+  VALUES (new.id, new.title, new.authors, new.publisher, new.tags, new.notes);
+END;
+CREATE TRIGGER IF NOT EXISTS trg_packages_fts_ad AFTER DELETE ON packages BEGIN
+  INSERT INTO packages_fts(packages_fts, rowid, title, authors, publisher, tags, notes)
+  VALUES ('delete', old.id, old.title, old.authors, old.publisher, old.tags, old.notes);
+END;
+CREATE TRIGGER IF NOT EXISTS trg_packages_fts_au AFTER UPDATE OF title, authors, publisher, tags, notes ON packages BEGIN
+  INSERT INTO packages_fts(packages_fts, rowid, title, authors, publisher, tags, notes)
+  VALUES ('delete', old.id, old.title, old.authors, old.publisher, old.tags, old.notes);
+  INSERT INTO packages_fts(rowid, title, authors, publisher, tags, notes)
+  VALUES (new.id, new.title, new.authors, new.publisher, new.tags, new.notes);
+END;
+`);
+  // 索引过期（触发器上线前的存量/外部直写）→ 一次性重建（幂等；count 对得上则跳过）
+  const ftsCount = (db.prepare("SELECT COUNT(*) AS n FROM packages_fts").get() as { n: number }).n;
+  const pkgCount = (db.prepare("SELECT COUNT(*) AS n FROM packages").get() as { n: number }).n;
+  if (ftsCount !== pkgCount) {
+    db.exec("INSERT INTO packages_fts(packages_fts) VALUES ('rebuild')");
+  }
 }
 
 function addColumn(

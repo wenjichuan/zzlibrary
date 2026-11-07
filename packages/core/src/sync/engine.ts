@@ -49,6 +49,8 @@ export interface LocalDevice {
   readManifestText?(path: string): Promise<string | null>;
   /** 按路径取回本地墓碑记忆（含 updatedAt 与 data.blobRefs——删除记账随墓碑上云）；无则 null */
   readTombstone?(path: string): Promise<{ updatedAt: string; data: Record<string, unknown> } | null>;
+  /** 冲刷设备侧批量缓冲的缓存写（基线/块缓存）；同步收尾时引擎调用 */
+  flushPendingWrites?(): Promise<void> | void;
   /** 读内容块字节（按哈希找本地文件/封面）；无则 null */
   readBlob(sha256: string): Promise<Uint8Array | null>;
   /** 应用一份远端清单（合并判断可复用 merge.ts） */
@@ -424,5 +426,6 @@ export async function fullSync(
 ): Promise<FullSyncReport> {
   const pullReport = await pull(device, remote);
   const pushReport = await push(device, remote, opts);
+  await device.flushPendingWrites?.(); // 批量缓冲的基线/块缓存写在此收尾落盘
   return { pull: pullReport, push: pushReport };
 }

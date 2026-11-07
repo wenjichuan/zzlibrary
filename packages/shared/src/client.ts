@@ -102,6 +102,12 @@ export const api = {
   // 包内文件管理
   addPackageFile: (packageId: number, stageId: string) =>
     request<FileDetail>(`/api/packages/${packageId}/files`, { method: "POST", body: JSON.stringify({ stage_id: stageId }) }),
+  /** 批量文件编辑（一次请求完成移除+新增；返回最新详情） */
+  applyPackageFiles: (packageId: number, removeIds: number[], addStageIds: string[]) =>
+    request<PackageDetail>(`/api/packages/${packageId}/files/batch`, {
+      method: "POST",
+      body: JSON.stringify({ remove_ids: removeIds, add_stage_ids: addStageIds }),
+    }),
   updatePackageFile: (packageId: number, fileId: number, patch: { name?: string; sort_order?: number }) =>
     request<FileDetail>(`/api/packages/${packageId}/files/${fileId}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePackageFile: (packageId: number, fileId: number) =>
