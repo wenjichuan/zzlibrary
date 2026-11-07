@@ -96,6 +96,18 @@ export class SyncService {
     });
   }
 
+  /** 带实例缓存的 store：同配置复用同一实例——WebDAV 的 mkcolCache 跨同步/跨取回保住，
+   * 不再每次同步对每个目录重付 MKCOL（此前每次 runSync/ensureFileLocal 都新建 store，缓存形同虚设）。
+   * 配置任何字段变化（JSON 键变）即重建。 */
+  private storeCache: { key: string; store: RemoteStore } | null = null;
+  private storeFor(config: SyncConfig): RemoteStore {
+    const key = JSON.stringify(config);
+    if (this.storeCache !== null && this.storeCache.key === key) return this.storeCache.store;
+    const store = this.createStore(config);
+    this.storeCache = { key, store };
+    return store;
+  }
+
   /** 存量文件哈希回填（files.sha256 为空的本地文件；首次全量、其后增量）。流式哈希不整读大文件。
    * 新文件优先（id 降序——刚入库的先受保护）；字节预算封顶（5000 个 2GB 视频不会绑架同步）。 */
   async hashPendingFiles(limit = 5000, budgetBytes = this.settings.hashBudgetBytes): Promise<number> {
@@ -132,7 +144,7 @@ export class SyncService {
     try {
       await this.hashPendingFiles();
       const device = new SqliteSyncDevice(this.db, this.settings);
-      const remote = this.createStore(config);
+      const remote = this.storeFor(config);
       const report = await fullSync(device, remote, { now: () => nowSqlite().replace(" ", "T") });
       this.lastReport = report;
       this.lastError = null;
@@ -203,7 +215,7 @@ export class SyncService {
       return { configured: true, running: false, changed: false, applied: 0, revision: local };
     }
     try {
-      const remote = this.createStore(config);
+      const remote = this.storeFor(config);
       const text = await remote.getText(LIBRARY_INDEX_PATH);
       if (text === null) {
         return { configured: true, running: false, changed: false, applied: 0, revision: local };
@@ -315,7 +327,7 @@ export class SyncService {
     if (f.sha256 === null) throw new Error("该文件从未同步过，云端没有副本");
     const config = this.loadConfig();
     if (config === null) throw new Error("尚未配置云端，无法取回");
-    const remote = this.createStore(config);
+    const remote = this.storeFor(config);
     const bytes = await remote.getBytes(blobPath(f.sha256));
     if (bytes === null) throw new Error("云端没有该文件的副本（可能尚未上传完成）");
     // 校验内容寻址
@@ -332,7 +344,7 @@ export class SyncService {
   async getBytesRange(hash: string, start: number, end: number): Promise<Uint8Array | null> {
     const config = this.loadConfig();
     if (config === null) return null;
-    const remote = this.createStore(config);
+    const remote = this.storeFor(config);
     if (remote.getBytesRange === undefined) return null;
     try {
       return await remote.getBytesRange(blobPath(hash), start, end);
@@ -345,7 +357,7 @@ export class SyncService {
   supportsRangeFetch(): boolean {
     const config = this.loadConfig();
     if (config === null) return false;
-    return this.createStore(config).getBytesRange !== undefined;
+    return this.storeFor(config).getBytesRange !== undefined;
   }
 
   /** 真封面透明取回（包封面端点用）。返回本地路径或 null（无真封面）。 */
@@ -358,7 +370,7 @@ export class SyncService {
     if (existsSync(coverPath)) return coverPath;
     const config = this.loadConfig();
     if (config === null) return null;
-    const remote = this.createStore(config);
+    const remote = this.storeFor(config);
     const bytes = await remote.getBytes(blobPath(row.cover_sha256));
     if (bytes === null || sha256Sync(bytes) !== row.cover_sha256) return null;
     mkdirSync(join(this.settings.artDir, "covers"), { recursive: true });
@@ -375,7 +387,7 @@ export class SyncService {
   async gcCloud(retentionDays = 180): Promise<GcReport> {
     const config = this.loadConfig();
     if (config === null) throw new Error("尚未配置云端");
-    const remote = this.createStore(config);
+    const remote = this.storeFor(config);
     const report: GcReport = {
       tombstonesRemoved: 0, blobsRemoved: 0, blobBytesRemoved: 0,
       blobsSkippedReferenced: 0, errors: [],

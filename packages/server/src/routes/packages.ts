@@ -1,6 +1,6 @@
 /** 资料包：暂存入库（stage→commit）、列表检索、详情/编辑/删除、
  * 包内文件管理、封面/书脊/文件流服务。 */
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   existsSync,
   mkdirSync,
@@ -11,15 +11,17 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
+  type WriteStream,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { detectFormat, displayDate, mediaTypeOf, parsePartialDate, sanitizeName, stemTitle } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { resolvePaths } from "../deps";
+import { streamMultipart } from "../multipart";
 import {
   getPackageFull,
   getPackageOr404,
@@ -35,7 +37,7 @@ import {
   type PackageRow,
 } from "../repo";
 import { inTransaction, nowSqlite, pstmt } from "../db";
-import { sha256Sync } from "../hashing";
+import { sha256FileSync, sha256Sync } from "../hashing";
 import { SMALL_FILE_THRESHOLD, parseRangeHeader, serveProxiedRange } from "../streaming";
 import { extractMeta } from "../extract";
 import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
@@ -114,21 +116,26 @@ interface StageResult {
   hasCover: boolean;
 }
 
-function runStage(
+/** 元数据抽取的文件大小上限：超过则跳过抽取（文件名兜底）——
+ * GB 级视频/压缩包本就无元数据可抽，避免「巨型 epub」把整文件读回内存。 */
+const EXTRACT_LIMIT = 16 * 1024 * 1024;
+
+/** stage 后置段：文件已流式落盘（含增量 sha256）——抽取元数据、写封面与 meta.json。 */
+function finishStage(
   settings: Env["Variables"]["settings"],
+  stagingDir: string,
+  target: string,
+  stageId: string,
   filename: string,
-  buffer: Buffer,
-  coverBytes?: Uint8Array,
+  size: number,
+  sha256: string,
+  coverBytes: Uint8Array | undefined,
 ): StageResult {
   const fmt = detectFormat(filename); // 不限格式：未知扩展名原样登记
-  const stageId = randomUUID().replaceAll("-", "");
-  const stagingDir = join(settings.stagingDir, stageId);
-  mkdirSync(stagingDir, { recursive: true });
-  const target = join(stagingDir, "file");
-  writeFileSync(target, buffer);
-  const size = buffer.length;
-
-  const meta = extractMeta(target, buffer, filename, fmt);
+  const meta =
+    size <= EXTRACT_LIMIT
+      ? extractMeta(target, readFileSync(target), filename, fmt) // 小文件读回一次供抽取（封面/页数/标题）
+      : { title: null, authors: [] as string[], publish_date: null, publisher: null, page_count: null, cover: null };
   const hasCover = meta.cover !== null || coverBytes !== undefined;
   if (meta.cover !== null) {
     writeFileSync(join(stagingDir, "cover.png"), meta.cover);
@@ -143,24 +150,80 @@ function runStage(
       format: fmt,
       size,
       page_count: meta.page_count,
+      sha256, // stage 流式写盘时已增量算好——commit 免第三次整读
     }),
   );
   return { stageId, filename, size, format: fmt, meta, hasCover };
 }
 
-
 packagesRouter.post("/api/packages/stage", async (c) => {
   const settings = c.get("settings");
-  const body = await c.req.parseBody();
-  const upload = body.file;
-  if (!(upload instanceof File) || !upload.name) {
+  const contentType = c.req.header("content-type") ?? "";
+  const rawBody = c.req.raw.body;
+  if (rawBody === null || !contentType.includes("multipart/form-data")) {
+    throw new HTTPException(422, { message: "缺少上传内容（multipart）" });
+  }
+  // 流式接收：file 字段直接写盘 + 增量哈希（GB 级文件不整读进内存）；
+  // cover（客户端渲染的 PDF 首页，小）与其他小字段缓冲（封顶防滥用）。
+  const stageId = randomUUID().replaceAll("-", "");
+  const stagingDir = join(settings.stagingDir, stageId);
+  mkdirSync(stagingDir, { recursive: true });
+  const target = join(stagingDir, "file");
+  const hash = createHash("sha256");
+  let filename: string | null = null;
+  let size = 0;
+  let coverBytes: Uint8Array | undefined;
+  let ws: WriteStream | null = null;
+  let field: { name: string; chunks: Buffer[]; len: number } | null = null;
+
+  await streamMultipart(rawBody, contentType, {
+    async onPartHeader({ name, filename: fn }) {
+      if (name === "file" && fn !== undefined && fn !== "") {
+        filename = fn;
+        ws = createWriteStream(target);
+        return;
+      }
+      field = { name, chunks: [], len: 0 };
+    },
+    async onChunk(bytes) {
+      if (ws !== null) {
+        hash.update(bytes);
+        size += bytes.length;
+        if (!ws.write(bytes)) {
+          await new Promise<void>((resolve, reject) => {
+            ws!.once("drain", resolve);
+            ws!.once("error", reject);
+          });
+        }
+        return;
+      }
+      if (field !== null && field.len < 16 * 1024 * 1024) {
+        field.chunks.push(Buffer.from(bytes));
+        field.len += bytes.length;
+      }
+    },
+    async onPartEnd() {
+      if (ws !== null) {
+        const w = ws;
+        ws = null;
+        await new Promise<void>((resolve, reject) => {
+          w.once("error", reject);
+          w.end(resolve);
+        });
+        return;
+      }
+      if (field !== null) {
+        if (field.name === "cover") coverBytes = new Uint8Array(Buffer.concat(field.chunks));
+        field = null;
+      }
+    },
+  });
+
+  if (filename === null) {
+    rmSync(stagingDir, { recursive: true, force: true });
     throw new HTTPException(422, { message: "缺少文件名" });
   }
-  const filename = upload.name;
-  const buffer = Buffer.from(await upload.arrayBuffer());
-  const coverUpload = body.cover;
-  const coverBytes = coverUpload instanceof File ? new Uint8Array(await coverUpload.arrayBuffer()) : undefined;
-  const result = runStage(settings, filename, buffer, coverBytes);
+  const result = finishStage(settings, stagingDir, target, stageId, filename, size, hash.digest("hex"), coverBytes);
   return c.json({
     stage_id: result.stageId,
     filename: result.filename,
@@ -224,7 +287,7 @@ packagesRouter.post("/api/packages", async (c) => {
 
   interface StagedInfo {
     dir: string;
-    info: { filename: string; format: string; size: number; page_count: number | null };
+    info: { filename: string; format: string; size: number; page_count: number | null; sha256?: string };
   }
   const staged: StagedInfo[] = [];
   for (const stageId of stageIds) {
@@ -272,12 +335,13 @@ packagesRouter.post("/api/packages", async (c) => {
     mkdirSync(pkgDir, { recursive: true });
     let order = 0;
     for (const { dir, info } of staged) {
-      const stagedBytes = readFileSync(join(dir, "file"));
+      // sha 优先用 stage 流式写盘时算好的；旧暂存（升级前遗留）兜底流式哈希——均不整读进内存
+      const sha = info.sha256 ?? sha256FileSync(join(dir, "file"));
       const f = db
         .prepare(
           "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
         )
-        .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, sha256Sync(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
+        .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, order, sha, nowSqlite(), randomUUID().replaceAll("-", ""));
       const fileId = Number(f.lastInsertRowid);
       const dest = join(pkgDir, `${fileId}_${info.filename}`);
       renameSync(join(dir, "file"), dest);
@@ -547,16 +611,17 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
     format: string;
     size: number;
     page_count: number | null;
+    sha256?: string;
   };
 
   const maxOrder = pkg.files.reduce((m, f) => Math.max(m, f.sort_order), -1);
-  const stagedBytes = readFileSync(join(stagingDir, "file"));
+  const stagedSha = info.sha256 ?? sha256FileSync(join(stagingDir, "file"));
   const { fileId, coverImg } = inTransaction(db, () => {
     const ins = db
       .prepare(
         "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
       )
-      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, sha256Sync(new Uint8Array(stagedBytes)), nowSqlite(), randomUUID().replaceAll("-", ""));
+      .run(pkgId, info.filename, info.format, info.size, info.page_count ?? null, maxOrder + 1, stagedSha, nowSqlite(), randomUUID().replaceAll("-", ""));
     const fileId = Number(ins.lastInsertRowid);
     const dir = packageDir(settings, pkg);
     mkdirSync(dir, { recursive: true });
@@ -627,16 +692,16 @@ packagesRouter.post("/api/packages/:id/files/batch", async (c) => {
     throw new HTTPException(422, { message: "不能移除全部文件（保存将删除整个资料包请走整包删除）" });
   }
   // 预读暂存信息（缺失/过期直接 404，不动库）
-  const staged: Array<{ dir: string; filename: string; format: string; size: number; pageCount: number | null }> = [];
+  const staged: Array<{ dir: string; filename: string; format: string; size: number; pageCount: number | null; sha?: string }> = [];
   for (const sid of addStageIds) {
     const dir = join(settings.stagingDir, sid);
     if (!existsSync(join(dir, "file"))) {
       throw new HTTPException(404, { message: `暂存文件已过期（${sid.slice(0, 8)}…），请重新上传` });
     }
     const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8")) as {
-      filename: string; format: string; size: number; page_count: number | null;
+      filename: string; format: string; size: number; page_count: number | null; sha256?: string;
     };
-    staged.push({ dir, filename: meta.filename, format: meta.format, size: meta.size, pageCount: meta.page_count });
+    staged.push({ dir, filename: meta.filename, format: meta.format, size: meta.size, pageCount: meta.page_count, sha: meta.sha256 });
   }
 
   const dir = packageDir(settings, pkg);
@@ -655,9 +720,9 @@ packagesRouter.post("/api/packages/:id/files/batch", async (c) => {
     let firstCover: Buffer | null = null;
     for (const s of staged) {
       order += 1;
-      const bytes = readFileSync(join(s.dir, "file"));
+      const sha = s.sha ?? sha256FileSync(join(s.dir, "file"));
       const ins = pstmt(db, "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)").run(
-        pkgId, s.filename, s.format, s.size, s.pageCount, order, sha256Sync(new Uint8Array(bytes)), nowSqlite(), randomUUID().replaceAll("-", ""),
+        pkgId, s.filename, s.format, s.size, s.pageCount, order, sha, nowSqlite(), randomUUID().replaceAll("-", ""),
       );
       const fileId = Number(ins.lastInsertRowid);
       const dest = join(dir, `${fileId}_${s.filename}`);

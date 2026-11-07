@@ -218,6 +218,43 @@ describe("同步：fs 云（本地目录）", () => {
     await call(appB, cookieB, "PUT", "/api/sync/config", { provider: "fs", autoSync: false, fs: { root: cloudDir } });
   });
 
+  it("流式入库：5MB 随机文件 stage→commit，哈希/字节一致，cover 字段可用", async () => {
+    const { createHash } = await import("node:crypto");
+    const size = 5 * 1024 * 1024;
+    const content = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) content[i] = (i * 13 + 5) & 0xff;
+    const sha = createHash("sha256").update(content).digest("hex");
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(content)]), "big-stream.bin");
+    // 真 1×1 PNG（sharp 才认；cover 字段会进封面归一管线）
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    form.append("cover", new Blob([new Uint8Array(png)]), "cover.png");
+    const st = await call(appA, cookieA, "POST", "/api/packages/stage", form);
+    expect(st.status).toBe(200);
+    expect(st.json.size).toBe(size);
+    expect(st.json.has_cover).toBe(true);
+    const commit = await call(appA, cookieA, "POST", "/api/packages", {
+      stage_ids: [st.json.stage_id],
+      meta: { title: "流式入库测试" },
+    });
+    expect(commit.status).toBe(201);
+    expect(commit.json.files[0].has_cover).toBe(true);
+    // sha256 不在 API 出参——直查库（stage 流式增量哈希 → commit 零重读登记）
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(dirA, "library.db"), { readOnly: true });
+    const row = db.prepare("SELECT sha256, local FROM files WHERE id = ?").get(commit.json.files[0].id) as { sha256: string; local: number };
+    db.close();
+    expect(row.sha256).toBe(sha);
+    expect(row.local).toBe(1);
+    // 取回字节逐一致（流式写盘无损坏）
+    const res = await appA.request(`/api/files/${commit.json.files[0].id}/file`, { headers: { cookie: cookieA } });
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).equals(content)).toBe(true);
+  });
+
   it("B 释放本地空间 → 条目还在 → 再读自动取回", async () => {
     const list = await call(appB, cookieB, "GET", "/api/packages?q=同步包甲");
     const pid = list.json.items[0].id;
