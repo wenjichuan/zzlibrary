@@ -6,7 +6,7 @@
 
 **Your documents, organized as a real library — not a folder tree.**
 
-zzlibrary is a self-hosted personal library: a virtual bookshelf where *time periods are shelf rows, a 3-level classification is one shelf, and every package gets a spine*. Browse your collection the way you browse a library, then read in place — EPUB, PDF, TXT, Markdown, HTML, docx, images, audio and video, with per-file reading progress that follows you.
+zzlibrary is a self-hosted personal library: your documents shelved like real books — classification decides which bookcase, era decides where on the shelf, and every **package** (a "bound volume" holding any number of files in any format) stands as one spine. Browse your collection the way you browse a library, then read in place — EPUB, PDF, TXT, Markdown, HTML, docx, images, audio and video, with per-file reading progress that follows you.
 
 ![Shelf view](docs/screenshots/shelf.png)
 
@@ -14,7 +14,7 @@ zzlibrary is a self-hosted personal library: a virtual bookshelf where *time per
 
 File managers make you *remember where things are*. zzlibrary makes your collection *legible at a glance*:
 
-- **Virtual bookshelf** — Y-Z side view of racks + an X-Z elastic timeline scroll where every shelf aligns across eras. A "package" (the unit of the library) holds any number of files of any format, and can sit on multiple shelves via multiple classification paths.
+- **Virtual bookshelf** — two views over the same collection: a side view of all your bookcases at a glance, and, inside any bookcase, a timeline scroll where spines line up by era — same-era books align across rows, busy eras take more room. A package can sit on multiple shelves at once via multiple classification paths.
 - **Read everything in place** — built-in reader with resume: EPUB (CFI), PDF, TXT (encoding auto-detect), Markdown/HTML/docx (sandboxed), images, audio/video players. One file row, one interaction contract.
 - **Local-first** — your data lives on your machine, in one folder: a SQLite database + your original files, byte-identical, never lock-in. No account, no cloud, no telemetry.
 - **Own your safety net** — one-click full-library backup to any local folder (consistent snapshot + all files). Copy the data folder and you've moved the library.
