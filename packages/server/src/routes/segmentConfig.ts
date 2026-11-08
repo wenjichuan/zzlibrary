@@ -6,7 +6,6 @@ import { parseRange } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { getCategory } from "../deps";
 import { nowSqlite } from "../db";
-import { recordTombstone } from "../sync-device";
 
 export const segmentConfigRouter = new Hono<Env>();
 
@@ -113,7 +112,6 @@ segmentConfigRouter.put("/api/segment-config", async (c) => {
     .catch(() => ({}) as never);
   validate(payload);
   const result = out(upsert(c.get("db"), "global", null, null, payload as { mode: string; params: Record<string, unknown> }));
-  c.get("sync").queueLocalChange();
   return c.json(result);
 });
 
@@ -127,7 +125,6 @@ segmentConfigRouter.put("/api/segment-config/:l2Id", async (c) => {
     .catch(() => ({}) as never);
   validate(payload);
   const result = out(upsert(db, "l2", l2Id, null, payload as { mode: string; params: Record<string, unknown> }));
-  c.get("sync").queueLocalChange();
   return c.json(result);
 });
 
@@ -138,9 +135,7 @@ segmentConfigRouter.delete("/api/segment-config/:l2Id", (c) => {
     .prepare("SELECT * FROM segment_configs WHERE scope = 'l2' AND l2_id = ?")
     .get(l2Id) as ConfigRow | undefined;
   if (cfg === undefined) throw new HTTPException(404, { message: "该二级分类没有覆盖配置" });
-  recordTombstone(db, "segment-configs", `l2-${(getCategory(db, l2Id) as { uuid: string }).uuid}`);
   db.prepare("DELETE FROM segment_configs WHERE id = ?").run(cfg.id);
-  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });
 
@@ -156,7 +151,6 @@ segmentConfigRouter.put("/api/segment-config/l3/:l3Id", async (c) => {
     .catch(() => ({}) as never);
   validate(payload);
   const result = out(upsert(db, "l3", l3.parent_id, l3Id, payload as { mode: string; params: Record<string, unknown> }));
-  c.get("sync").queueLocalChange();
   return c.json(result);
 });
 
@@ -167,8 +161,6 @@ segmentConfigRouter.delete("/api/segment-config/l3/:l3Id", (c) => {
     .prepare("SELECT * FROM segment_configs WHERE scope = 'l3' AND l3_id = ?")
     .get(l3Id) as ConfigRow | undefined;
   if (cfg === undefined) throw new HTTPException(404, { message: "该三级分类没有覆盖配置" });
-  recordTombstone(db, "segment-configs", `l3-${(getCategory(db, l3Id) as { uuid: string }).uuid}`);
   db.prepare("DELETE FROM segment_configs WHERE id = ?").run(cfg.id);
-  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });

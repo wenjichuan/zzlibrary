@@ -5,7 +5,6 @@ import type { Env } from "../env";
 import { randomUUID } from "node:crypto";
 import { getCategory, type CategoryRow } from "../deps";
 import { nowSqlite } from "../db";
-import { recordTombstone } from "../sync-device";
 
 export const categoriesRouter = new Hono<Env>();
 
@@ -113,7 +112,6 @@ categoriesRouter.patch("/api/categories/:cid", async (c) => {
     nowSqlite(),
     cid,
   );
-  c.get("sync").queueLocalChange();
   return c.json({ id: cid, level: node.level, parent_id: parentId, name, sort_order: sortOrder });
 });
 
@@ -125,12 +123,6 @@ categoriesRouter.delete("/api/categories/:cid", (c) => {
   const hasChildren = db.prepare("SELECT id FROM categories WHERE parent_id = ? LIMIT 1").get(cid);
   if (hasChildren) throw new HTTPException(422, { message: "该分类包含子分类，请先删除子分类" });
   // 引用该分类的包路径由外键级联删除（FK ON DELETE CASCADE + PRAGMA foreign_keys=ON）
-  const cascaded = db
-    .prepare("SELECT uuid FROM package_paths WHERE l1_id = ? OR l2_id = ? OR l3_id = ?")
-    .all(cid, cid, cid) as Array<{ uuid: string }>;
-  for (const r of cascaded) recordTombstone(db, "package-paths", r.uuid);
-  recordTombstone(db, "categories", node.uuid);
   db.prepare("DELETE FROM categories WHERE id = ?").run(cid);
-  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });

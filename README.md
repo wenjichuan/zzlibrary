@@ -2,11 +2,11 @@
 
 面向个人的多端资料管理与阅读器（个人资料库）。核心特色是 **虚拟图书馆书架**：时间分段是书架层、三级分类是单座书架、二级分类是一排书架；Y-Z 侧视与 X-Z 弹性时间轴长卷（跨层年代对齐）两种视图。
 
-正在转向**本地优先多端架构**（iOS/iPadOS/Android/鸿蒙/macOS/Windows + 用户自己的云作同步介质）：业务逻辑全部收进 `@zzlibrary/core`（纯 TS，所有端共用），新功能只写一份。
+**1.0（release_v1.0）为本地优先离线版**：资料全部保存在本机，不联网、不上云，跨设备云同步将在后续版本提供；设置页提供「备份整库到本机目录」作为数据安全兜底。业务逻辑全部收进 `@zzlibrary/core`（纯 TS，所有端共用），新功能只写一份。
 
 ## 技术栈
 
-- **域核心** `packages/core`：纯 TS 业务逻辑（日期/时间分段/聚合/包状态/入库规则 + 同步引擎：版本化清单/合并规则/RemoteStore），全端共用
+- **域核心** `packages/core`：纯 TS 业务逻辑（日期/时间分段/聚合/包状态/入库规则），全端共用
 - **服务端** `packages/server`：Hono + node:sqlite + sharp——API、入库、封面/书脊生成、Range 流；Node ≥ 24（用内置 node:sqlite）
 - **Web** `web/`：React 19 + TypeScript + Vite + Tailwind CSS
 - **共享包** `packages/shared`：TS 类型 + API 客户端

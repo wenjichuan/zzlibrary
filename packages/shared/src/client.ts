@@ -1,6 +1,7 @@
 export * from "./types";
 /** fetch API 客户端：同源 + 会话 Cookie。 */
 import type {
+  BackupReport,
   CategoryNode,
   FileDetail,
   PackageDetail,
@@ -12,11 +13,6 @@ import type {
   ShelvesDetail,
   Stats,
   StagedFile,
-  GcReport,
-  SyncConfig,
-  SyncReport,
-  SyncCheckResponse,
-  SyncStatus,
 } from "./types";
 
 export class ApiError extends Error {
@@ -157,21 +153,10 @@ export const api = {
     return request<{ ok: boolean; real: boolean }>(`/api/packages/${packageId}/cover`, { method: "PUT", body: form });
   },
 
-  // 同步与备份
-  syncConfig: () => request<{ config: SyncConfig | null }>("/api/sync/config"),
-  putSyncConfig: (config: SyncConfig) =>
-    request<{ ok: boolean; config: SyncConfig }>("/api/sync/config", { method: "PUT", body: JSON.stringify(config) }),
-  testSync: () => request<{ ok: boolean }>("/api/sync/test", { method: "POST" }),
-  syncNow: () => request<{ ok: boolean; report: SyncReport }>("/api/sync/now", { method: "POST" }),
-  syncStatus: () => request<SyncStatus>("/api/sync/status"),
-  syncCheck: () => request<SyncCheckResponse>("/api/sync/check"),
-  gcCloud: (retentionDays?: number) =>
-    request<{ ok: boolean; report: GcReport }>("/api/sync/gc", {
-      method: "POST",
-      body: JSON.stringify({ retention_days: retentionDays }),
-    }),
-  releasePackage: (packageId: number) =>
-    request<{ ok: boolean; releasedFiles: number; freedBytes: number }>(`/api/sync/release/${packageId}`, { method: "POST" }),
+  // 维护与备份
+  /** 整库备份到本机目录（VACUUM INTO 快照 + files/art 拷贝）。 */
+  backupLibrary: (dest: string) =>
+    request<BackupReport>("/api/backup/run", { method: "POST", body: JSON.stringify({ dest }) }),
 };
 
 export function formatBytes(n: number): string {

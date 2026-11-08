@@ -1,7 +1,7 @@
 /** server 端到端测试：临时库上跑认证/入库两步/编辑/进度/分段/删除全链。
  * 通过 app.request() 直连 Hono 应用（无需起端口）。 */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
@@ -237,5 +237,88 @@ describe("删除清理", () => {
     const pid = list.json.items[0].id;
     expect((await call("DELETE", `/api/packages/${pid}`)).json.ok).toBe(true);
     expect((await call("GET", `/api/packages/${pid}`)).status).toBe(404);
+  });
+});
+
+describe("流式入库", () => {
+  it("5MB 随机文件 stage→commit，哈希/字节一致，cover 字段可用", async () => {
+    const { createHash } = await import("node:crypto");
+    const size = 5 * 1024 * 1024;
+    const content = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) content[i] = (i * 13 + 5) & 0xff;
+    const sha = createHash("sha256").update(content).digest("hex");
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(content)]), "big-stream.bin");
+    // 真 1×1 PNG（sharp 才认；cover 字段会进封面归一管线）
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    form.append("cover", new Blob([new Uint8Array(png)]), "cover.png");
+    const st = await call("POST", "/api/packages/stage", form);
+    expect(st.status).toBe(200);
+    expect(st.json.size).toBe(size);
+    expect(st.json.has_cover).toBe(true);
+    const commit = await call("POST", "/api/packages", {
+      stage_ids: [st.json.stage_id],
+      meta: { title: "流式入库测试" },
+    });
+    expect(commit.status).toBe(201);
+    expect(commit.json.files[0].has_cover).toBe(true);
+    // sha256 不在 API 出参——直查库（stage 流式增量哈希 → commit 零重读登记）
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(dataDir, "library.db"), { readOnly: true });
+    const row = db.prepare("SELECT sha256, local FROM files WHERE id = ?").get(commit.json.files[0].id) as { sha256: string; local: number };
+    db.close();
+    expect(row.sha256).toBe(sha);
+    expect(row.local).toBe(1);
+    // 取回字节逐一致（流式写盘无损坏）
+    const res = await app.request(`/api/files/${commit.json.files[0].id}/file`, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).equals(content)).toBe(true);
+  });
+});
+
+describe("本机备份", () => {
+  let backupDir = "";
+
+  it("备份整库 → 快照完整性 + files/art 拷贝 + 字节一致", async () => {
+    backupDir = mkdtempSync(join(tmpdir(), "zzlib-backup-"));
+    const r = await call("POST", "/api/backup/run", { dest: backupDir });
+    expect(r.status).toBe(200);
+    expect(r.json.files).toBeGreaterThanOrEqual(1);
+    expect(r.json.bytes).toBeGreaterThan(0);
+    // 快照完整性 + 行数与 API 一致
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(backupDir, "library.db"), { readOnly: true });
+    const ic = db.prepare("PRAGMA integrity_check").get() as { integrity_check: string };
+    expect(ic.integrity_check).toBe("ok");
+    const n = db.prepare("SELECT COUNT(*) AS n FROM packages").get() as { n: number };
+    db.close();
+    const list = await call("GET", "/api/packages?page_size=1");
+    expect(n.n).toBe(list.json.total);
+    // files 拷贝存在（入库用例已落盘文件）
+    const filesCopied = readdirSync(join(backupDir, "files"), { recursive: true });
+    expect(filesCopied.length).toBeGreaterThan(0);
+  });
+
+  it("重复备份同一目录 → 覆盖旧快照成功", async () => {
+    const r = await call("POST", "/api/backup/run", { dest: backupDir });
+    expect(r.status).toBe(200);
+  });
+
+  it("目标在数据目录内部 → 422 防套娃", async () => {
+    const r = await call("POST", "/api/backup/run", { dest: dataDir });
+    expect(r.status).toBe(422);
+  });
+
+  afterAll(() => {
+    if (backupDir) {
+      try {
+        rmSync(backupDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      } catch {
+        /* Windows 句柄未释放 */
+      }
+    }
   });
 });

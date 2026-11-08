@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { prettyDisplayDate } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail, type PackageDetail } from "@zzlibrary/shared/client";
-import { useToast } from "../stores/toast";
 import FileRow from "./FileRow";
 
 function fmtPath(p: { l1?: { name: string } | null; l2?: { name: string } | null; l3?: { name: string } | null }): string {
@@ -17,22 +16,18 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** 包详情主体（两个详情面板共用的唯一实现）：封面+元数据区、继续读、释放本地空间、包内文件列表。
- * 容器差异（弹窗 vs 抽屉）由各自外壳承担；此处保证交互契约一致——继续读/释放不再是某一面板独有。 */
+/** 包详情主体（两个详情面板共用的唯一实现）：封面+元数据区、继续读、包内文件列表。
+ * 容器差异（弹窗 vs 抽屉）由各自外壳承担；此处保证交互契约一致——继续读不再是某一面板独有。 */
 export default function PackageDetailBody({
   detail,
   onRead,
-  onRefresh,
   metaExtra,
 }: {
   detail: PackageDetail;
   onRead: (file: FileDetail) => void;
-  onRefresh: () => void;
   /** 容器专属动作（如编辑按钮），渲染在元数据列尾 */
   metaExtra?: React.ReactNode;
 }) {
-  const { push } = useToast();
-  const [releasing, setReleasing] = useState(false);
   // 长列表上限：几百文件的包先出前 50 条，「显示全部」再放行（封面 img 风暴防护）
   const FILE_LIMIT = 50;
   const [showAllFiles, setShowAllFiles] = useState(false);
@@ -45,20 +40,6 @@ export default function PackageDetailBody({
         .sort((a, b) => (b.progress!.updated_at < a.progress!.updated_at ? -1 : 1))[0] ?? null,
     [detail.files],
   );
-  const anyLocal = useMemo(() => detail.files.some((f) => f.local !== false), [detail.files]);
-
-  const release = async () => {
-    setReleasing(true);
-    try {
-      const r = await api.releasePackage(detail.id);
-      push("success", `已释放 ${r.releasedFiles} 个文件（${formatBytes(r.freedBytes)}），阅读时会自动从云端取回`);
-      onRefresh();
-    } catch (err) {
-      push("error", err instanceof Error ? err.message : "释放失败");
-    } finally {
-      setReleasing(false);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -94,15 +75,6 @@ export default function PackageDetailBody({
         )}
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm font-semibold text-stone-700">包内文件（{detail.files.length}）</span>
-          {anyLocal && detail.can_release === true && (
-            <button
-              className="text-xs text-stone-400 hover:text-red-600"
-              disabled={releasing}
-              onClick={() => void release()}
-            >
-              {releasing ? "释放中…" : "释放本地空间"}
-            </button>
-          )}
         </div>
         <div className="space-y-2">
           {visibleFiles.map((f) => (

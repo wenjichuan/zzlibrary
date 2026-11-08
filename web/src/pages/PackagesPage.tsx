@@ -330,7 +330,6 @@ export default function PackagesPage() {
             setDetail(null);
           }}
           onRead={openReader}
-          onRefresh={() => void openDetailById(detail.id)}
         />
       )}
       {readerNode}
@@ -361,20 +360,17 @@ function DetailModal({
   onClose,
   onEdit,
   onRead,
-  onRefresh,
 }: {
   detail: PackageDetail;
   onClose: () => void;
   onEdit: () => void;
   onRead: (file: FileDetail) => void;
-  onRefresh: () => void;
 }) {
   return (
     <Modal title="资料包详情" onClose={onClose} wide>
       <PackageDetailBody
         detail={detail}
         onRead={onRead}
-        onRefresh={onRefresh}
         metaExtra={
           <Button variant="outline" size="sm" onClick={onEdit}>
             编辑

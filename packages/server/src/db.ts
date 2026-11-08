@@ -121,10 +121,10 @@ function columnsOf(db: DatabaseSync, table: string): Set<string> {
 /** 结构迁移：
  * 1) 建表（新库）；
  * 2) uuid 回填——packages/files/categories/package_paths 增加 uuid 列（TEXT 32hex + 唯一索引），
- *    作为跨端同步契约的实体身份（本地整型主键保留为设备内代理键）；
+ *    实体身份（本地整型主键保留为设备内代理键）；
  * 3) 无 uuid 的旧行补齐；
- * 4) 同步契约列（updated_at / files.sha256 / files.local / packages.cover_sha256+palette）
- *    与同步状态表。幂等。 */
+ * 4) 内容寻址/展示列（updated_at / files.sha256 / files.local / packages.cover_sha256+palette）。
+ * 幂等；不删除旧库可能残留的 sync_* 表（1.1 若启用同步可续用基线）。 */
 export function migrate(db: DatabaseSync): void {
   db.exec(DDL);
   for (const table of ["packages", "files", "categories", "package_paths"]) {
@@ -153,55 +153,15 @@ export function migrate(db: DatabaseSync): void {
   addColumn(db, "packages", "palette", "TEXT");
   addColumn(db, "segment_configs", "updated_at", "DATETIME", backfill);
   db.exec("UPDATE categories SET updated_at = COALESCE(updated_at, created_at)");
-  // 同步状态表（设备本地，不同步自身）
+  // 应用级 KV（FTS 重建旗标等）。注：带同步的旧库里旗标曾存于 sync_state——
+  // 该表不再创建也不删除（旧库残留无害）；首次启动回读旧旗标避免无谓重建。
   db.exec(`
-CREATE TABLE IF NOT EXISTS sync_state (
+CREATE TABLE IF NOT EXISTS app_state (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS sync_manifest_cache (
-  path TEXT PRIMARY KEY,
-  sha256 TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sync_blob_cache (
-  sha256 TEXT PRIMARY KEY
-);
-CREATE TABLE IF NOT EXISTS sync_baselines (
-  path TEXT PRIMARY KEY,
-  env TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sync_tombstones (
-  path TEXT PRIMARY KEY,
-  updated_at TEXT NOT NULL,
-  blob_refs TEXT
-);
-CREATE TABLE IF NOT EXISTS sync_manifest_build (
-  path TEXT PRIMARY KEY,
-  sha TEXT NOT NULL,
-  text TEXT NOT NULL,
-  stamp TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sync_bucket_cache (
-  path TEXT PRIMARY KEY,
-  sha256 TEXT NOT NULL
-);
-
 CREATE INDEX IF NOT EXISTS ix_files_sha256 ON files (sha256);
 `);
-  // 墓碑携带内容块引用（删除记账在云端墓碑里，任何设备可 GC）；旧表补列
-  addColumn(db, "sync_tombstones", "blob_refs", "TEXT");
-  // 移除短暂的本地 GC 记账表（方案改为云端墓碑记账）
-  db.exec("DROP TABLE IF EXISTS sync_gc_pending");
-  // v2 分桶布局一次性迁移：清逐实体云态缓存（清单缓存+集合哈希）→ 下次同步按新布局全量重推。
-  // 基线/墓碑/构建缓存按逻辑键保留——信封字节不变，基线仍有效。
-  const v2 = db.prepare("SELECT value FROM sync_state WHERE key = 'layout_v2'").get() as
-    | { value: string }
-    | undefined;
-  if (v2 === undefined) {
-    db.exec("DELETE FROM sync_manifest_cache");
-    db.prepare("DELETE FROM sync_state WHERE key = 'col_hashes'").run();
-    db.prepare("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('layout_v2', '1')").run();
-  }
   // 全文搜索（trigram 分词：支持中文子串；≥3 字查询走 FTS，短查询回退 LIKE）
   db.exec(`
 CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(
@@ -225,12 +185,23 @@ END;
 `);
   // 存量索引一次性重建。守卫必须用持久旗标——外部内容 FTS 表的 COUNT(*) 报的是内容表行数，
   // 空索引也会「对得上」，按计数判断永远不会触发重建（已实测踩坑）。
-  const flag = db.prepare("SELECT value FROM sync_state WHERE key = 'fts_v1_rebuilt'").get() as
+  let flag = db.prepare("SELECT value FROM app_state WHERE key = 'fts_v1_rebuilt'").get() as
     | { value: string }
     | undefined;
   if (flag === undefined) {
+    // 带同步历史的旧库：旗标曾在 sync_state（v1.0 不再建该表，表存在则回读）
+    const legacyTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'")
+      .get();
+    if (legacyTable !== undefined) {
+      flag = db.prepare("SELECT value FROM sync_state WHERE key = 'fts_v1_rebuilt'").get() as
+        | { value: string }
+        | undefined;
+    }
+  }
+  if (flag === undefined) {
     db.exec("INSERT INTO packages_fts(packages_fts) VALUES ('rebuild')");
-    db.prepare("INSERT OR REPLACE INTO sync_state (key, value) VALUES ('fts_v1_rebuilt', '1')").run();
+    db.prepare("INSERT OR REPLACE INTO app_state (key, value) VALUES ('fts_v1_rebuilt', '1')").run();
   }
 }
 

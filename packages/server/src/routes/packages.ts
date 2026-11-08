@@ -13,7 +13,7 @@ import {
   writeFileSync,
   type WriteStream,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { createHash, randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
@@ -38,10 +38,8 @@ import {
 } from "../repo";
 import { inTransaction, nowSqlite, pstmt } from "../db";
 import { sha256FileSync, sha256Sync } from "../hashing";
-import { SMALL_FILE_THRESHOLD, parseRangeHeader, serveProxiedRange } from "../streaming";
 import { extractMeta } from "../extract";
 import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
-import { recordPackageTombstones, recordTombstone } from "../sync-device";
 
 export const packagesRouter = new Hono<Env>();
 
@@ -72,14 +70,8 @@ function packageDetail(
   pkg: PackageFull,
 ) {
   const base = packageOut(db, pkg, new Map());
-  // 文件存在性探测：两次 readdir 代替每文件两次 existsSync（百文件包 = 200 次 stat → 2 次目录读）
+  // 封面存在性探测：一次 readdir 代替每文件 existsSync
   const coverNames = new Set(safeReaddir(join(settings.artDir, "filecovers")));
-  const pkgDirSet = new Set<string>();
-  const firstPath = pkg.files[0]?.file_path;
-  if (firstPath !== undefined) {
-    const dir = dirname(join(settings.dataDir, firstPath));
-    for (const name of safeReaddir(dir)) pkgDirSet.add(name);
-  }
   return {
     ...base,
     has_real_cover: pkg.row.cover_sha256 !== null,
@@ -91,7 +83,6 @@ function packageDetail(
       page_count: f.page_count,
       sort_order: f.sort_order,
       has_cover: coverNames.has(`${f.id}.png`),
-      local: f.local === 1 && pkgDirSet.has(basename(f.file_path)),
       progress: progressOut(getProgress(db, f.id)),
     })),
   };
@@ -370,7 +361,6 @@ packagesRouter.post("/api/packages", async (c) => {
     pkgId,
   );
   for (const { dir } of staged) rmSync(dir, { recursive: true, force: true });
-  c.get("sync").queueLocalChange();
   return c.json(packageDetail(settings, db, getPackageOr404(db, pkgId)), 201);
 });
 
@@ -505,8 +495,7 @@ function parseIdFilterNullable(raw: string | null | undefined): [number | null, 
 
 packagesRouter.get("/api/packages/:id", (c) => {
   const pkg = getPackageOr404(c.get("db"), Number(c.req.param("id")));
-  // 释放本地空间的安全前提（云端确认有全部字节副本）；UI 据此显示按钮，释放端点再硬校验
-  return c.json({ ...packageDetail(c.get("settings"), c.get("db"), pkg), can_release: c.get("sync").canRelease(pkg.row.id).ok });
+  return c.json(packageDetail(c.get("settings"), c.get("db"), pkg));
 });
 
 packagesRouter.patch("/api/packages/:id", async (c) => {
@@ -568,7 +557,6 @@ packagesRouter.patch("/api/packages/:id", async (c) => {
     const palette = await paletteFromCover(coverImg, meta.title.trim());
     db.prepare("UPDATE packages SET palette = ? WHERE id = ?").run(JSON.stringify(palette), pkgId);
   }
-  c.get("sync").queueLocalChange();
   return c.json(packageDetail(settings, db, getPackageOr404(db, pkgId)));
 });
 
@@ -586,11 +574,7 @@ packagesRouter.delete("/api/packages/:id", (c) => {
     const fc = fileCoverPath(settings, f);
     if (existsSync(fc)) unlinkSync(fc);
   }
-  inTransaction(db, () => {
-    recordPackageTombstones(db, pkg);
-    db.prepare("DELETE FROM packages WHERE id = ?").run(pkg.row.id);
-  });
-  c.get("sync").queueLocalChange();
+  db.prepare("DELETE FROM packages WHERE id = ?").run(pkg.row.id);
   return c.json({ ok: true });
 });
 
@@ -653,7 +637,6 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
     );
   }
   rmSync(stagingDir, { recursive: true, force: true });
-  c.get("sync").queueLocalChange();
   return c.json(
     {
       id: fileId,
@@ -751,7 +734,6 @@ packagesRouter.post("/api/packages/:id/files/batch", async (c) => {
     );
   }
   for (const s of staged) rmSync(s.dir, { recursive: true, force: true });
-  c.get("sync").queueLocalChange();
   return c.json(packageDetail(settings, db, getPackageOr404(db, pkgId)));
 });
 
@@ -779,8 +761,7 @@ packagesRouter.patch("/api/packages/:id/files/:fileId", async (c) => {
     params.push(nowSqlite());
     params.push(fileId);
     db.prepare(`UPDATE files SET ${sets.join(", ")} WHERE id = ?`).run(...params);
-    c.get("sync").queueLocalChange();
-  }
+    }
   const updated = loadFiles(db, pkgId).find((x) => x.id === fileId)!;
   return c.json({
     id: updated.id,
@@ -811,13 +792,9 @@ packagesRouter.delete("/api/packages/:id/files/:fileId", (c) => {
   if (existsSync(filePath)) unlinkSync(filePath);
   const fc = fileCoverPath(settings, f);
   if (existsSync(fc)) unlinkSync(fc);
-  recordTombstone(db, "files", f.uuid,
-    typeof f.sha256 === "string" && f.sha256 !== "" ? [{ sha256: f.sha256, size: f.file_size }] : undefined);
-  recordTombstone(db, "progress", f.uuid);
   db.prepare("DELETE FROM files WHERE id = ?").run(fileId);
   syncCounts(db, pkgId);
   recomputePackageStatus(db, pkgId); // 删文件同理（如移除最后一个未读文件→已读）
-  c.get("sync").queueLocalChange();
   return c.json({ ok: true });
 });
 
@@ -835,25 +812,21 @@ function serveFile(c: Context<Env>, path: string, mediaType: string) {
 packagesRouter.get("/api/packages/:id/cover", async (c) => {
   const db = c.get("db");
   const settings = c.get("settings");
-  const sync = c.get("sync");
   const pkg = getPackageOr404(db, Number(c.req.param("id")));
   const path = join(settings.artDir, "covers", `${pkg.row.id}.png`);
   if (!existsSync(path)) {
-    // 真封面在云端 → 取回；没有真封面 → 本地确定性占位（palette 优先用列内缓存，释放后颜色不变）
-    const fetched = await sync.ensureCoverLocal(pkg.row.id).catch(() => null);
-    if (fetched === null) {
-      mkdirSync(join(settings.artDir, "covers"), { recursive: true });
-      const paletteRow = db.prepare("SELECT palette FROM packages WHERE id = ?").get(pkg.row.id) as { palette: string | null } | undefined;
-      let palette: Awaited<ReturnType<typeof paletteFromCover>> | null = null;
-      if (paletteRow?.palette) {
-        try {
-          palette = JSON.parse(paletteRow.palette);
-        } catch {
-          palette = null;
-        }
+    // 没有真封面 → 本地确定性占位（palette 优先用列内缓存，保证封面颜色稳定）
+    mkdirSync(join(settings.artDir, "covers"), { recursive: true });
+    const paletteRow = db.prepare("SELECT palette FROM packages WHERE id = ?").get(pkg.row.id) as { palette: string | null } | undefined;
+    let palette: Awaited<ReturnType<typeof paletteFromCover>> | null = null;
+    if (paletteRow?.palette) {
+      try {
+        palette = JSON.parse(paletteRow.palette);
+      } catch {
+        palette = null;
       }
-      writeFileSync(path, await makePlaceholderCover(pkg.row.title, palette ?? (await paletteFromCover(null, pkg.row.title))));
     }
+    writeFileSync(path, await makePlaceholderCover(pkg.row.title, palette ?? (await paletteFromCover(null, pkg.row.title))));
   }
   return serveFile(c, path, "image/png");
 });
@@ -879,7 +852,6 @@ packagesRouter.put("/api/packages/:id/cover", async (c) => {
     JSON.stringify(palette),
     pkgId,
   );
-  c.get("sync").queueLocalChange();
   return c.json({ ok: true, real: true });
 });
 
@@ -907,9 +879,8 @@ packagesRouter.get("/api/files/:fileId/cover", (c) => {
   return serveFile(c, path, "image/png");
 });
 
-packagesRouter.get("/api/files/:fileId/file", async (c) => {
+packagesRouter.get("/api/files/:fileId/file", (c) => {
   const settings = c.get("settings");
-  const sync = c.get("sync");
   const db = c.get("db");
   const fileId = Number(c.req.param("fileId"));
   const f = db.prepare("SELECT * FROM files WHERE id = ?").get(fileId) as
@@ -920,41 +891,7 @@ packagesRouter.get("/api/files/:fileId/file", async (c) => {
   if (existsSync(realPath)) {
     return serveWithRange(c, realPath, mediaTypeOf(f.format));
   }
-  // 本地无字节（已释放/新机恢复）：小文件或云端不支持区间读 → 整文件透明取回
-  if (f.sha256 === null) throw new HTTPException(404, { message: "文件缺失（从未同步，云端没有副本）" });
-  const rangeable = f.file_size > SMALL_FILE_THRESHOLD && sync.supportsRangeFetch();
-  if (!rangeable) {
-    try {
-      const path = await sync.ensureFileLocal(fileId);
-      return serveWithRange(c, path, mediaTypeOf(f.format));
-    } catch (err) {
-      throw new HTTPException(404, { message: err instanceof Error ? err.message : "文件缺失" });
-    }
-  }
-  // 大文件流式代理：前缀内读盘 / 接续前缘边转发边落盘 / 越前缘纯代理
-  const range = parseRangeHeader(c.req.header("range"), f.file_size);
-  const start = range?.start ?? 0;
-  const end = range?.end ?? f.file_size - 1;
-  if (start > end) {
-    return c.body(null, 416, { "Content-Range": `bytes */${f.file_size}` });
-  }
-  return serveProxiedRange(
-    c,
-    {
-      fileId,
-      sha256: f.sha256,
-      realPath,
-      size: f.file_size,
-      fetchRange: (s, e) => sync.getBytesRange(f.sha256!, s, e),
-      onFinalize: async () => {
-        pstmt(db, "UPDATE files SET local = 1 WHERE id = ?").run(fileId);
-        pstmt(db, "INSERT OR IGNORE INTO sync_blob_cache (sha256) VALUES (?)").run(f.sha256);
-      },
-    },
-    start,
-    end,
-    range !== null,
-  );
+  throw new HTTPException(404, { message: "文件缺失（磁盘上找不到该文件的字节）" });
 });
 
 function serveWithRange(c: Context<Env>, path: string, mediaType: string) {
