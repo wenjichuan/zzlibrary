@@ -49,3 +49,7 @@ Thumbs.db
 .drill-data-b/
 .verify-restore/
 .e2e-stress-100k/
+
+# 发布产物
+dist-server/
+dist-release/

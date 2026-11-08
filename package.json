@@ -10,6 +10,12 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
     "vitest": "^5.1.0"
+  },
+  "version": "1.0.0",
+  "scripts": {
+    "build:server": "node scripts/build-server.mjs",
+    "build:release": "node scripts/build-release.mjs"
   }
 }

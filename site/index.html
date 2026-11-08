@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>zzlibrary · 个人资料库</title>
+<meta name="description" content="把你的资料放进一座自己的图书馆——虚拟书架、全格式阅读器、本地优先。自托管、开源（AGPL-3.0）。" />
+<style>
+  :root {
+    --paper: #faf6ef;
+    --paper-deep: #f1e9dc;
+    --ink: #292524;
+    --ink-soft: #57534e;
+    --wood: #8a5a33;
+    --wood-deep: #6b4423;
+    --brass: #b08d57;
+    --line: #e2d9c8;
+    --serif: "Noto Serif SC", "Songti SC", "SimSun", Georgia, serif;
+    --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.7; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--wood); text-decoration: none; }
+  a:hover { color: var(--wood-deep); }
+
+  header { border-bottom: 1px solid var(--line); background: rgba(250,246,239,.92); backdrop-filter: blur(6px); position: sticky; top: 0; z-index: 10; }
+  .nav { display: flex; align-items: center; gap: 16px; padding: 14px 0; }
+  .brand { font-family: var(--serif); font-weight: 700; font-size: 19px; color: var(--ink); }
+  .brand span { color: var(--brass); margin-right: 8px; }
+  .nav .grow { flex: 1; }
+  .lang { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 4px 14px; font-size: 13px; cursor: pointer; color: var(--ink-soft); }
+  .gh { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-soft); }
+  .gh img { width: 18px; height: 18px; }
+
+  .hero { padding: 72px 0 48px; text-align: center; }
+  .hero h1 { font-family: var(--serif); font-size: clamp(30px, 5vw, 46px); font-weight: 700; letter-spacing: .02em; }
+  .hero h1 em { font-style: normal; color: var(--wood); }
+  .hero p.sub { margin: 18px auto 0; max-width: 640px; font-size: 17px; color: var(--ink-soft); }
+  .cta { margin-top: 30px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 11px 26px; border-radius: 10px; font-size: 15px; font-weight: 600; border: 1px solid var(--wood); }
+  .btn.primary { background: var(--wood); color: #fff; }
+  .btn.primary:hover { background: var(--wood-deep); color: #fff; }
+  .btn.ghost { color: var(--wood); background: transparent; }
+  .btn.ghost:hover { background: var(--paper-deep); }
+
+  .shot { margin: 44px auto 0; max-width: 940px; border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 10px; box-shadow: 0 24px 60px -30px rgba(80,55,25,.35); }
+  .shot img { display: block; width: 100%; border-radius: 8px; }
+  .shot .bar { display: flex; gap: 6px; padding: 4px 6px 10px; }
+  .shot .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); display: block; }
+
+  section.block { padding: 64px 0; }
+  section.block.alt { background: var(--paper-deep); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  h2.title { font-family: var(--serif); font-size: 28px; text-align: center; margin-bottom: 40px; }
+  h2.title small { display: block; font-size: 14px; color: var(--brass); font-family: var(--sans); font-weight: 500; letter-spacing: .35em; margin-bottom: 8px; }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 26px 24px; }
+  .card .icon { font-size: 26px; }
+  .card h3 { font-family: var(--serif); font-size: 19px; margin: 10px 0 8px; }
+  .card p { font-size: 14.5px; color: var(--ink-soft); }
+
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+  .gallery figure { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .gallery img { display: block; width: 100%; }
+  .gallery figcaption { padding: 10px 16px; font-size: 13.5px; color: var(--ink-soft); border-top: 1px solid var(--line); }
+
+  pre.code { background: #2d2a26; color: #e8e2d5; border-radius: 10px; padding: 18px 22px; font-size: 14px; overflow-x: auto; font-family: ui-monospace, Consolas, monospace; text-align: left; }
+  pre.code .c { color: #9c9284; }
+  .qs-note { text-align: center; color: var(--ink-soft); font-size: 14.5px; margin-top: 16px; }
+
+  .roadmap { max-width: 620px; margin: 0 auto; }
+  .roadmap .item { display: flex; gap: 16px; padding: 14px 0; border-bottom: 1px dashed var(--line); }
+  .roadmap .item:last-child { border-bottom: none; }
+  .roadmap .tag { flex: none; width: 52px; height: 26px; border-radius: 999px; background: var(--brass); color: #fff; font-size: 12.5px; display: flex; align-items: center; justify-content: center; margin-top: 3px; }
+  .roadmap .tag.dim { background: var(--line); color: var(--ink-soft); }
+  .roadmap b { font-family: var(--serif); }
+  .roadmap p { font-size: 14px; color: var(--ink-soft); }
+
+  footer { padding: 36px 0 48px; text-align: center; color: var(--ink-soft); font-size: 13.5px; }
+  footer .sep { margin: 0 10px; color: var(--line); }
+
+  [data-lang] { display: none; }
+  html[lang="zh-CN"] [data-lang="zh"] { display: block; }
+  html[lang="zh-CN"] [data-lang="zh"].inline { display: inline; }
+  html[lang="en"] [data-lang="en"] { display: block; }
+  html[lang="en"] [data-lang="en"].inline { display: inline; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <div class="brand"><span>🏛</span>zzlibrary <small style="font-weight:400;color:var(--ink-soft);font-size:14px;margin-left:8px;" data-lang="zh" class="inline">个人资料库</small><small style="font-weight:400;color:var(--ink-soft);font-size:14px;margin-left:8px;" data-lang="en" class="inline">Personal Library</small></div>
+    <div class="grow"></div>
+    <button class="lang" id="langToggle" onclick="toggleLang()">English</button>
+    <a class="gh" href="https://github.com/wenobug/zzlibrary" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<div class="wrap hero">
+  <h1 data-lang="zh">把你的资料，放进<em>一座自己的图书馆</em></h1>
+  <h1 data-lang="en">Your collection, organized as <em>a real library</em></h1>
+  <p class="sub" data-lang="zh">不是一棵文件夹树，而是一排排书架：时间分段是书架层、分类是单座书架、每份资料占一格书脊。书架间穿行、原地开读——EPUB / PDF / TXT / MD / docx / 图片 / 音视频，进度自动续读。</p>
+  <p class="sub" data-lang="en">Not a folder tree — rows of shelves: time periods are rack rows, classifications are shelves, every package gets a spine. Wander the aisles, read in place: EPUB / PDF / TXT / Markdown / docx / images / audio / video, with resume built in.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/wenobug/zzlibrary" target="_blank" rel="noopener"><span data-lang="zh" class="inline">GitHub 获取</span><span data-lang="en" class="inline">Get it on GitHub</span></a>
+    <a class="btn ghost" href="#quickstart"><span data-lang="zh" class="inline">三行命令自托管</span><span data-lang="en" class="inline">Self-host in 3 lines</span></a>
+  </div>
+  <div class="shot">
+    <div class="bar"><i></i><i></i><i></i></div>
+    <img src="assets/shelf.png" alt="虚拟图书馆书架" />
+  </div>
+</div>
+
+<section class="block alt">
+  <div class="wrap">
+    <h2 class="title"><small data-lang="zh" class="inline">为什么</small><small data-lang="en" class="inline">WHY</small><span data-lang="zh" class="inline">一眼可读的馆藏</span><span data-lang="en" class="inline">A legible collection at a glance</span></h2>
+    <div class="features">
+      <div class="card">
+        <div class="icon">🏛</div>
+        <h3 data-lang="zh">虚拟图书馆书架</h3>
+        <h3 data-lang="en">Virtual library shelves</h3>
+        <p data-lang="zh">Y-Z 侧视书架阵列 + X-Z 弹性时间轴长卷（书多的年代长、书少的年代短，跨层同列≈同一时代）。资料包可挂多条分类路径，同时出现在多个书架。</p>
+        <p data-lang="en">Y-Z side view of racks plus an X-Z elastic timeline scroll — eras with more books take more room. A package can sit on multiple shelves via multiple classification paths.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📖</div>
+        <h3 data-lang="zh">全格式原地阅读</h3>
+        <h3 data-lang="en">Read everything in place</h3>
+        <p data-lang="zh">内置阅读器带断点续读：EPUB（CFI 定位）、PDF、TXT（编码自动探测）、MD / HTML / docx（沙箱渲染）、图片、音视频。资料包=书架一格，可含任意多文件。</p>
+        <p data-lang="en">Built-in reader with resume: EPUB (CFI), PDF, TXT (encoding auto-detect), Markdown / HTML / docx (sandboxed), images, audio & video. A package holds any number of files.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🔒</div>
+        <h3 data-lang="zh">本地优先，数据在手</h3>
+        <h3 data-lang="en">Local-first, your data stays yours</h3>
+        <p data-lang="zh">全部数据在你自己机器的一个目录里（SQLite + 原件字节原样）；无账号、无云、无遥测。一键「备份整库」，整个目录拷走就是搬家。</p>
+        <p data-lang="en">Everything lives in one folder on your machine — SQLite plus your files, byte-identical. No accounts, no cloud, no telemetry. One-click full backup; copy the folder to move the library.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <h2 class="title"><small data-lang="zh" class="inline">一览</small><small data-lang="en" class="inline">TOUR</small><span data-lang="zh" class="inline">在书架间穿行</span><span data-lang="en" class="inline">Wander the aisles</span></h2>
+    <div class="gallery">
+      <figure>
+        <img src="assets/timeline.png" alt="弹性时间轴长卷" loading="lazy" />
+        <figcaption data-lang="zh">弹性时间轴长卷：2206 本的书脊墙，拖拽平移、悬停预览、点击进详情（演示数据为十万包压测库）。</figcaption>
+        <figcaption data-lang="en">Elastic timeline scroll: a wall of 2,206 spines. Drag to pan, hover to preview, click for details (demo data from a 100k-package stress library).</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/reader.png" alt="内置阅读器" loading="lazy" />
+        <figcaption data-lang="zh">内置 TXT 阅读器：进度条、断点续读、缩放；EPUB/PDF/音视频同等待遇。</figcaption>
+        <figcaption data-lang="en">Built-in TXT reader with progress and resume; EPUB / PDF / media get the same treatment.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="quickstart">
+  <div class="wrap">
+    <h2 class="title"><small data-lang="zh" class="inline">开始</small><small data-lang="en" class="inline">START</small><span data-lang="zh" class="inline">三行命令，自托管</span><span data-lang="en" class="inline">Self-host in three lines</span></h2>
+    <pre class="code"><span class="c"># Docker（推荐）</span>
+docker run -d --name zzlibrary -p 8000:8000 \
+  -v /path/to/data:/data \
+  ghcr.io/wenobug/zzlibrary:latest</pre>
+    <p class="qs-note" data-lang="zh">或者：下载 zip 解压、装好 Node.js ≥ 22.5、双击启动脚本——浏览器打开 localhost:8000，局域网手机/平板同馆共读。详见 <a href="https://github.com/wenobug/zzlibrary#quick-start" target="_blank" rel="noopener">README</a>。</p>
+    <p class="qs-note" data-lang="en">Or: grab the zip, install Node.js ≥ 22.5, double-click the start script — then open localhost:8000 from any device on your LAN. See the <a href="https://github.com/wenobug/zzlibrary#quick-start" target="_blank" rel="noopener">README</a>.</p>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <h2 class="title"><small data-lang="zh" class="inline">路线</small><small data-lang="en" class="inline">ROADMAP</small><span data-lang="zh" class="inline">1.0 刻意离线优先</span><span data-lang="en" class="inline">1.0 is deliberately offline-first</span></h2>
+    <div class="roadmap">
+      <div class="item">
+        <div class="tag">1.0</div>
+        <div><b data-lang="zh" class="inline">Web 端（现已可用）</b><b data-lang="en" class="inline">Web (available now)</b>
+          <p data-lang="zh">书架 + 阅读器 + 本机备份；自托管 zip / Docker 分发。</p>
+          <p data-lang="en">Shelves + reader + local backup; distributed as a self-hosted zip / Docker image.</p></div>
+      </div>
+      <div class="item">
+        <div class="tag dim">1.1</div>
+        <div><b data-lang="zh" class="inline">桌面应用（Windows / macOS）</b><b data-lang="en" class="inline">Desktop apps (Windows / macOS)</b>
+          <p data-lang="zh">Tauri 壳，安装即用。</p>
+          <p data-lang="en">Tauri shells, install and go.</p></div>
+      </div>
+      <div class="item">
+        <div class="tag dim">1.2</div>
+        <div><b data-lang="zh" class="inline">移动应用（iOS / iPadOS / Android / 鸿蒙）</b><b data-lang="en" class="inline">Mobile apps (iOS / iPadOS / Android / HarmonyOS)</b>
+          <p data-lang="zh">同一套界面，六端同馆。</p>
+          <p data-lang="en">Same UI, one library on every device.</p></div>
+      </div>
+      <div class="item">
+        <div class="tag dim">2.0</div>
+        <div><b data-lang="zh" class="inline">跨设备同步（你自己的云）</b><b data-lang="en" class="inline">Cross-device sync (bring your own cloud)</b>
+          <p data-lang="zh">WebDAV / S3 兼容，本地释放 + 透明取回。</p>
+          <p data-lang="en">WebDAV / S3-compatible, local space release with transparent re-fetch.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>🏛 zzlibrary · <span data-lang="zh" class="inline">个人资料库</span><span data-lang="en" class="inline">Personal Library</span></div>
+    <div style="margin-top:8px;">
+      AGPL-3.0 <span class="sep">|</span> <a href="https://github.com/wenobug/zzlibrary" target="_blank" rel="noopener">GitHub</a> <span class="sep">|</span> <span data-lang="zh" class="inline">自托管 · 无遥测 · 数据在你手里</span><span data-lang="en" class="inline">Self-hosted · No telemetry · Your data, your machine</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  function toggleLang() {
+    const html = document.documentElement;
+    const next = html.getAttribute("lang") === "zh-CN" ? "en" : "zh-CN";
+    html.setAttribute("lang", next);
+    document.getElementById("langToggle").textContent = next === "zh-CN" ? "English" : "中文";
+  }
+</script>
+</body>
+</html>

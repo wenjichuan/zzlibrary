@@ -83,7 +83,7 @@ export function createApp(settings = new Settings()): Hono<Env> {
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
   // 生产模式：Web 静态资源 + SPA 深链回退（资源文件名带哈希，进程内缓存即可——每请求 readFileSync 是纯浪费）
-  const dist = join(settings.dataDir, "..", "web", "dist");
+  const dist = settings.webDistDir;
   const distIndex = join(dist, "index.html");
   if (existsSync(distIndex)) {
     const indexHtml = readFileSync(distIndex, "utf-8");

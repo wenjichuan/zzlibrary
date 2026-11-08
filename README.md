@@ -1,33 +1,63 @@
-# zzlibrary
+# zzlibrary · Personal Library
 
-面向个人的多端资料管理与阅读器（个人资料库）。核心特色是 **虚拟图书馆书架**：时间分段是书架层、三级分类是单座书架、二级分类是一排书架；Y-Z 侧视与 X-Z 弹性时间轴长卷（跨层年代对齐）两种视图。
+[![CI](https://github.com/wenobug/zzlibrary/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![中文说明](https://img.shields.io/badge/%E8%AF%B4%E6%98%8E-%E4%B8%AD%E6%96%87-red)](README.zh-CN.md)
 
-**1.0（release_v1.0）为本地优先离线版**：资料全部保存在本机，不联网、不上云，跨设备云同步将在后续版本提供；设置页提供「备份整库到本机目录」作为数据安全兜底。业务逻辑全部收进 `@zzlibrary/core`（纯 TS，所有端共用），新功能只写一份。
+**Your documents, organized as a real library — not a folder tree.**
 
-## 技术栈
+zzlibrary is a self-hosted personal library: a virtual bookshelf where *time periods are shelf rows, a 3-level classification is one shelf, and every package gets a spine*. Browse your collection the way you browse a library, then read in place — EPUB, PDF, TXT, Markdown, HTML, docx, images, audio and video, with per-file reading progress that follows you.
 
-- **域核心** `packages/core`：纯 TS 业务逻辑（日期/时间分段/聚合/包状态/入库规则），全端共用
-- **服务端** `packages/server`：Hono + node:sqlite + sharp——API、入库、封面/书脊生成、Range 流；Node ≥ 24（用内置 node:sqlite）
-- **Web** `web/`：React 19 + TypeScript + Vite + Tailwind CSS
-- **共享包** `packages/shared`：TS 类型 + API 客户端
-- **移动端 / 桌面端**（规划中）：Expo（含鸿蒙 RNOH）/ Tauri，嵌入 core
+![Shelf view](docs/screenshots/shelf.png)
 
-## 开发
+## Why
+
+File managers make you *remember where things are*. zzlibrary makes your collection *legible at a glance*:
+
+- **Virtual bookshelf** — Y-Z side view of racks + an X-Z elastic timeline scroll where every shelf aligns across eras. A "package" (the unit of the library) holds any number of files of any format, and can sit on multiple shelves via multiple classification paths.
+- **Read everything in place** — built-in reader with resume: EPUB (CFI), PDF, TXT (encoding auto-detect), Markdown/HTML/docx (sandboxed), images, audio/video players. One file row, one interaction contract.
+- **Local-first** — your data lives on your machine, in one folder: a SQLite database + your original files, byte-identical, never lock-in. No account, no cloud, no telemetry.
+- **Own your safety net** — one-click full-library backup to any local folder (consistent snapshot + all files). Copy the data folder and you've moved the library.
+- **Fast at scale** — FTS5 full-text search, SQL-aggregated shelf overview, lazy-loaded racks. Tested with 100,000 packages.
+
+![Timeline view](docs/screenshots/timeline.png)
+
+## Quick start
+
+**Docker (recommended for self-hosters):**
 
 ```bash
-# 服务端（Node >= 24）
-npm install
-npm run dev -w @zzlibrary/server   # :8000，ZZLIB_DATA_DIR / ZZLIB_PORT 可覆盖
-
-# 前端
-npm run dev -w @zzlibrary/web      # http://localhost:5173，/api 代理到 8000
-
-# 测试
-npm test -w @zzlibrary/core && npm test -w @zzlibrary/server
+docker run -d --name zzlibrary -p 8000:8000 \
+  -v /path/to/zzlibrary-data:/data \
+  ghcr.io/wenobug/zzlibrary:latest
 ```
 
-默认账号 `admin / zzlibrary`（用环境变量 `ZZLIB_USERNAME` / `ZZLIB_PASSWORD` 修改，密码支持 pbkdf2 哈希）。
+**Or a plain zip (no Docker needed):** grab the latest [`zzlibrary-server-*.zip`](../../releases), unzip, install [Node.js ≥ 22.5](https://nodejs.org), double-click `start-windows.bat` (or `./start-linux.sh`). Open `http://localhost:8000`, default account `admin / zzlibrary`.
 
-## 文档
+Every device on your LAN (phone, tablet) can open the same library at `http://<server-ip>:8000`.
 
-需求与里程碑见 [docs/需求说明.md](docs/需求说明.md)。
+Deployment details, environment variables and **security notes** (change the default password; don't expose directly to the public internet — use Tailscale/WireGuard): see [DEPLOY.md](DEPLOY.md) / [部署指南](README.zh-CN.md#部署).
+
+## Roadmap
+
+- **1.1** — Desktop apps (Windows/macOS, Tauri)
+- **1.2** — Mobile apps (iOS/iPadOS/Android via Capacitor; HarmonyOS shell)
+- **Later** — Cross-device sync & backup to **your own cloud** (WebDAV / S3-compatible), local space release with transparent re-fetch
+
+1.0 is deliberately offline-first: no cloud, no accounts, your data stays on your machine.
+
+## Development
+
+```bash
+npm install                # Node >= 24 (uses built-in node:sqlite)
+npm test -w @zzlibrary/core && npm test -w @zzlibrary/server
+npm run dev -w @zzlibrary/server    # API server on :8000
+npm run dev -w @zzlibrary/web       # web UI on :5173 (proxies /api)
+npm run build:release               # bundled server + release zip
+```
+
+Monorepo: `packages/core` (pure-TS domain logic shared by every future client), `packages/server` (Hono + node:sqlite + sharp), `packages/shared` (types + API client), `web` (React 19 + Vite + Tailwind).
+
+## License
+
+[AGPL-3.0](LICENSE) — free to use, study, modify and self-host. Closed-source forks offered as a service must open their source. 中文说明见 [README.zh-CN.md](README.zh-CN.md).

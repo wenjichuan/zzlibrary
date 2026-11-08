@@ -1,12 +1,23 @@
-/** 应用配置：环境变量（前缀 ZZLIB_）或仓库根 .env 文件（与 Python 版同名同义）。 */
+/** 应用配置：环境变量（前缀 ZZLIB_）或应用根 .env 文件（与 Python 版同名同义）。 */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// 仓库根 = packages/server/src → 上三级
+// 本文件所在目录（源码=packages/server/src；打包产物=dist-server）
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = resolve(SRC_DIR, "..", "..", "..");
+
+/** 应用根：① env ZZLIB_ROOT 显式指定（部署脚本/Docker/Tauri 壳统一入口）；
+ * ② 打包产物（dist-server/index.js）→ 其父目录（zip 解压即跑，零配置）；
+ * ③ 源码运行 → packages/server/src 上三级（仓库根，行为同旧版）。 */
+export function resolveRoot(): string {
+  const fromEnv = process.env.ZZLIB_ROOT;
+  if (fromEnv !== undefined && fromEnv !== "") return resolve(fromEnv);
+  if (basename(SRC_DIR) === "dist-server") return dirname(SRC_DIR);
+  return resolve(SRC_DIR, "..", "..", "..");
+}
+
+export const REPO_ROOT = resolveRoot();
 
 function parseEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
@@ -27,6 +38,8 @@ function env(name: string): string | undefined {
 }
 
 export class Settings {
+  /** 应用根（部署布局锚点：web/dist、.env、默认 data 的基准） */
+  readonly rootDir: string;
   /** 数据目录：库文件、原件、封面/书脊缓存、上传暂存 */
   readonly dataDir: string;
   /** 单账号 */
@@ -40,7 +53,8 @@ export class Settings {
   readonly port: number;
 
   constructor() {
-    this.dataDir = env("DATA_DIR") ?? join(REPO_ROOT, "data");
+    this.rootDir = env("ROOT") ?? REPO_ROOT;
+    this.dataDir = env("DATA_DIR") ?? join(this.rootDir, "data");
     this.username = env("USERNAME") ?? "admin";
     this.password = env("PASSWORD") ?? "zzlibrary";
     this.sessionSecret = env("SESSION_SECRET") ?? null;
@@ -51,6 +65,16 @@ export class Settings {
 
   get dbPath(): string {
     return join(this.dataDir, "library.db");
+  }
+  /** web 构建产物目录（服务进程静态伺服 + SPA 回退）：
+   * ① env ZZLIB_WEB_DIST 显式指定；② 应用根下 web/dist（源码仓库/发布包/Docker 布局）；
+   * ③ 旧行为兜底 dataDir 的上级 web/dist（自定义数据目录且 dist 在旁边的部署）。 */
+  get webDistDir(): string {
+    const fromEnv = env("WEB_DIST");
+    if (fromEnv !== undefined) return fromEnv;
+    const primary = join(this.rootDir, "web", "dist");
+    if (existsSync(primary)) return primary;
+    return join(this.dataDir, "..", "web", "dist");
   }
   get filesDir(): string {
     return join(this.dataDir, "files");
