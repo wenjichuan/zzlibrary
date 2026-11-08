@@ -1,7 +1,9 @@
 /** 排视图（Y-Z · 书架侧面）：一架 = 一个二级分类的**书架侧面**——顶铜牌 + 整块木侧板
  * （看不见书）+ 横隔板板沿 + 板沿间插卡式标签牌（三级分类名 + 藏书数）→ 多架并排对比。 */
 import { useEffect, useRef, useState } from "react";
+import { usePanToScroll } from "../hooks/panScroll";
 import { SERIF, type RackVM } from "./shelfVM";
+import { ViewHint } from "./ui";
 
 const SIDE_W = 208; // 书架（侧视）宽 px
 const BAND_H = 62; // 隔板之间的层档高 px
@@ -19,6 +21,8 @@ export function AisleView({
   const scrollRef = useRef<HTMLDivElement>(null);
   // 书架横向窗口化：只渲染视口（±2 架）内的书架，两侧占位块撑住滚动条
   const [win, setWin] = useState<[number, number]>([0, racks.length]);
+  // 程序性滚动（拖拽钩子写 scrollLeft）后的窗口同步兜底——部分 WebView 不触发 scroll 事件
+  const syncWinRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -29,70 +33,33 @@ export function AisleView({
       setWin((prev) => (prev[0] === first && prev[1] === last ? prev : [first, last]));
     };
     update();
+    syncWinRef.current = update;
     el.addEventListener("scroll", update, { passive: true });
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => {
+      syncWinRef.current = () => undefined;
       el.removeEventListener("scroll", update);
       ro.disconnect();
     };
   }, [racks.length]);
 
-  // 拖拽 = 滚动（与正面时间轴一致）；拖动超过 4px 吞掉随之而来的 click（不误进书架）
-  const dragRef = useRef<{ x0: number; y0: number; sl0: number; st0: number; moved: boolean } | null>(
-    null,
+  // 拖拽 = 滚动（与正面时间轴同一实现，共享钩子）；双轴同容器：inner/outer 指向同一滚动元素
+  const { onPanStart, onPanMove, onPanEnd } = usePanToScroll(
+    { inner: scrollRef, outer: scrollRef },
+    () => syncWinRef.current(),
   );
-  const onPanStart = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    dragRef.current = { x0: e.clientX, y0: e.clientY, sl0: el.scrollLeft, st0: el.scrollTop, moved: false };
-  };
-  const onPanMove = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    const el = scrollRef.current;
-    if (!d || !el) return;
-    const dx = e.clientX - d.x0;
-    const dy = e.clientY - d.y0;
-    if (!d.moved) {
-      if (Math.hypot(dx, dy) < 4) return;
-      d.moved = true;
-      el.style.cursor = "grabbing";
-      el.style.userSelect = "none";
-    }
-    el.scrollLeft = d.sl0 - dx;
-    el.scrollTop = d.st0 - dy;
-  };
-  const onPanEnd = () => {
-    const d = dragRef.current;
-    dragRef.current = null;
-    const el = scrollRef.current;
-    if (el) {
-      el.style.cursor = "";
-      el.style.userSelect = "";
-    }
-    if (d?.moved) {
-      el?.addEventListener(
-        "click",
-        (ev) => {
-          ev.stopPropagation();
-          ev.preventDefault();
-        },
-        { capture: true, once: true },
-      );
-    }
-  };
 
   const [first, last] = win;
   return (
-    <div className="flex h-full flex-col bg-[#f4efe4]">
+    <div className="flex h-full flex-col bg-paper">
       {/* 说明放滚动区外（界面文字不随横/纵滚动滑动，也不作为拖拽起点），与正面时间轴口径一致；手机/矮视口隐藏让位书架 */}
-      <div className="hidden px-8 pb-1 pt-5 text-[13px] text-stone-500 md:block zz-hide-short" style={{ fontFamily: SERIF }}>
+      <ViewHint className="px-8 pb-1 pt-5 text-[13px] text-stone-600" style={{ fontFamily: SERIF }}>
         侧视 · 填充条=相对藏书量 · 拖拽=浏览全部书架 · 滚轮=上下浏览 · 点击书架=正面时间轴
-      </div>
+      </ViewHint>
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-auto"
+        className="min-h-0 flex-1 overscroll-contain overflow-auto"
         onPointerDown={onPanStart}
         onPointerMove={onPanMove}
         onPointerUp={onPanEnd}
@@ -153,7 +120,7 @@ function BookcaseSide({
         }}
       >
         <span className="flex items-baseline justify-between">
-          <span className="truncate text-[14px] font-semibold tracking-[0.08em] text-[#3d2c12]">
+          <span className="truncate text-[14px] font-semibold tracking-[0.08em] text-wood-deep">
             {rack.label}
           </span>
           <span className="ml-2 shrink-0 text-[10px] text-[#57431f]">{rack.total} 包</span>
@@ -191,13 +158,13 @@ function BookcaseSide({
                 title={`${floor.label} · ${floor.total} 包`}
               >
                 <span className="flex items-baseline justify-between">
-                  <span className="truncate text-[13px] tracking-[0.1em] text-[#4a3a22]">
+                  <span className="truncate text-[13px] tracking-[0.1em] text-wood-ink">
                     {floor.label}
                   </span>
-                  <span className="ml-2 shrink-0 text-[11px] text-[#8a744a]">{floor.total}</span>
+                  <span className="ml-2 shrink-0 text-[11px] text-wood-mid">{floor.total}</span>
                 </span>
                 <span
-                  className="mt-1 h-[3px] rounded-full bg-[#8a6c3c]/70"
+                  className="mt-1 h-[3px] rounded-full bg-wood/70"
                   style={{
                     width: `${Math.max(5, Math.round((floor.total / maxFloorTotal) * 100))}%`,
                   }}

@@ -145,7 +145,8 @@ export default function UploadPage() {
     setBusy(true);
     try {
       const pkg = await api.commitPackage(stageIds, metaToInput({ ...meta, title }));
-      for (const k of stageIds) liveStages.current.delete(k);
+      // 记账按 item.key（liveStages.set 的键）——已入库的 stage 不再被离开页面的 discard 误伤
+      for (const it of stagedItems) liveStages.current.delete(it.key);
       setDonePkg({ id: pkg.id, title: pkg.title });
       push("success", `已入库「${pkg.title}」`);
     } catch (err) {

@@ -82,6 +82,12 @@ export function buildRackVMs(data: ShelvesDetail): RackVM[] {
   });
 }
 
+/** 架 key（`g<l2标识>-<组序>`）→ l2 标识（数字 id 或 "none"）。
+ * key 格式的编/解码同住此文件——消费方（LibraryPage）不再自行字符串手术。 */
+export function l2KeyOfRack(rackKey: string): string {
+  return rackKey.split("-")[0]!.slice(1);
+}
+
 /* ---------- 日期/展示纯函数 ---------- */
 
 export const SERIF = `"Noto Serif SC", "Songti SC", SimSun, serif`;
@@ -100,7 +106,7 @@ export const yearLabel = yearLabelOf;
 const restOf = restOfDisplay;
 
 /** 资料包排序：年 → 月日 → 包名（同日按包名拼音）。 */
-export function cmpByDate(a: ShelfPackage, b: ShelfPackage): number {
+function cmpByDate(a: ShelfPackage, b: ShelfPackage): number {
   const da = a.publish_date;
   const db = b.publish_date;
   if (!da || !db) return da === db ? a.title.localeCompare(b.title, "zh") : da ? -1 : 1;

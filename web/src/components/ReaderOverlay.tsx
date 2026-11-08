@@ -254,14 +254,14 @@ function EpubReader({
       <div ref={hostRef} className="h-full" />
       {/* 工具条 */}
       <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white/95 px-2 py-1 shadow-lg">
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.prev()} title="上一页（←）">←</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.prev()} title="上一页（←）" aria-label="上一页">←</button>
         {toc.length > 0 && (
           <button className="rounded-full px-3 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => onToc(!showToc)}>目录</button>
         )}
         <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setFontSize((s) => Math.max(12, s - 1))} title="缩小">A−</button>
         <span className="w-8 text-center text-xs tabular-nums text-stone-400">{fontSize}</span>
         <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setFontSize((s) => Math.min(28, s + 1))} title="放大">A+</button>
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.next()} title="下一页（→）">→</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.next()} title="下一页（→）" aria-label="下一页">→</button>
       </div>
       {showToc && (
         <div className="absolute inset-y-0 left-0 w-72 overflow-y-auto border-r border-stone-200 bg-white p-3 shadow-xl">
@@ -312,11 +312,15 @@ function PdfReader({
         const startPage = typeof initialProgress?.locator?.page === "number" ? initialProgress.locator.page : 1;
         setDocState({ page: Math.min(Math.max(1, startPage), doc.numPages), numPages: doc.numPages, scale: 1 });
       } catch (err) {
-        if (!dead) setError(err instanceof Error ? err.message : "打开 PDF 失败");
+        if (!dead) setError("打开 PDF 失败：" + (err instanceof Error ? err.message : "未知错误"));
       }
     })();
     return () => {
       dead = true;
+      // 释放 worker 端文档（反复开关 PDF 不驻留内存）
+      const d = docRef.current as { destroy?: () => Promise<void> } | null;
+      docRef.current = null;
+      void d?.destroy?.().catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.id]);
@@ -326,11 +330,12 @@ function PdfReader({
   useEffect(() => {
     if (page === 0 || docRef.current === null) return;
     let dead = false;
+    let task: { cancel: () => void; promise: Promise<void> } | null = null;
     void (async () => {
       const doc = docRef.current!;
       const p = (await doc.getPage(page)) as {
         getViewport: (o: { scale: number }) => { width: number; height: number };
-        render: (o: { canvasContext: CanvasRenderingContext2D; viewport: unknown }) => { promise: Promise<void> };
+        render: (o: { canvasContext: CanvasRenderingContext2D; viewport: unknown }) => { cancel: () => void; promise: Promise<void> };
       };
       if (dead || canvasRef.current === null || wrapRef.current === null) return;
       const canvas = canvasRef.current;
@@ -343,10 +348,19 @@ function PdfReader({
       canvas.style.width = `${Math.floor(viewport.width)}px`;
       canvas.style.height = `${Math.floor(viewport.height)}px`;
       const ctx = canvas.getContext("2d")!;
-      await p.render({ canvasContext: ctx, viewport }).promise;
+      task = p.render({ canvasContext: ctx, viewport });
+      try {
+        await task.promise;
+      } catch (err) {
+        // 快速翻页/缩放会取消在途任务（RenderingCancelledException）——预期路径不报错
+        const cancelled = err instanceof Error && err.name === "RenderingCancelledException";
+        if (!dead && !cancelled) setError("PDF 渲染失败，请重试");
+      }
     })();
     return () => {
       dead = true;
+      // 同一 canvas 并发 render 会被 pdfjs 拒绝——先取消在途任务再让位给下一次渲染
+      task?.cancel();
     };
   }, [page, scale]);
 
@@ -383,9 +397,9 @@ function PdfReader({
         <span className="px-1 text-xs tabular-nums text-stone-500">{page} / {numPages}</span>
         <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => turn(1)} title="下一页（→）">→</button>
         <span className="mx-1 h-4 w-px bg-stone-200" />
-        <button className="rounded-full px-2 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setDocState((s) => s && { ...s, scale: Math.max(0.5, s.scale - 0.2) })}>−</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" aria-label="缩小" onClick={() => setDocState((s) => s && { ...s, scale: Math.max(0.5, s.scale - 0.2) })}>−</button>
         <span className="w-10 text-center text-xs tabular-nums text-stone-400">{Math.round(scale * 100)}%</span>
-        <button className="rounded-full px-2 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setDocState((s) => s && { ...s, scale: Math.min(3, s.scale + 0.2) })}>＋</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" aria-label="放大" onClick={() => setDocState((s) => s && { ...s, scale: Math.min(3, s.scale + 0.2) })}>＋</button>
       </div>
     </>
   );
@@ -394,7 +408,9 @@ function PdfReader({
 // ---------- TXT ----------
 
 async function fetchText(file: FileDetail): Promise<string> {
-  const buf = await (await fetch(api.fileUrl(file.id), { credentials: "include" })).arrayBuffer();
+  const resp = await fetch(api.fileUrl(file.id), { credentials: "include" });
+  if (!resp.ok) throw new Error(`文件取回失败（HTTP ${resp.status}）`);
+  const buf = await resp.arrayBuffer();
   const bytes = new Uint8Array(buf);
   let label = "utf-8";
   try {
@@ -449,7 +465,9 @@ function TextReader({
         el.appendChild(frag);
         const startPct = typeof initialProgress?.locator?.scroll === "number" ? initialProgress.locator.scroll : 0;
         if (startPct > 0) setTimeout(() => {
-          el.scrollTop = (el.scrollHeight - el.clientHeight) * (startPct / 100);
+          // 滚动容器是外层（ref 挂内层正文 div，写侧监听用的就是 parentElement）——滚错元素则恢复恒为 0
+          const scroller = el.parentElement;
+          if (scroller !== null) scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * (startPct / 100);
         }, 0);
         setReady(true);
       } catch (err) {
@@ -516,7 +534,9 @@ function DocReader({
           const { marked } = await import("marked");
           html = await marked.parse(text);
         } else if (file.format === "docx") {
-          const buf = await (await fetch(api.fileUrl(file.id), { credentials: "include" })).arrayBuffer();
+          const resp = await fetch(api.fileUrl(file.id), { credentials: "include" });
+          if (!resp.ok) throw new Error(`文件取回失败（HTTP ${resp.status}）`);
+          const buf = await resp.arrayBuffer();
           const mammoth = await import("mammoth");
           const result = await mammoth.convertToHtml({ arrayBuffer: buf });
           html = result.value;

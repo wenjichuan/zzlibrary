@@ -20,8 +20,8 @@ import { dayOf, toUtc, type FloorVM } from "./shelfVM";
 
 export const LABEL_W = 92; // 左侧竖排架签宽
 export const SPINE_W = 24; // 统一书脊厚度（px，缩放前）
-export const GAP = 3; // 书脊间距
-export const GAP_W = 24; // 时代空档（各层皆无书）的固定窄条宽
+const GAP = 3; // 书脊间距
+const GAP_W = 24; // 时代空档（各层皆无书）的固定窄条宽
 
 /** 估算文本像素宽（CJK ≈ 字号，西文 ≈ 0.55 倍）。 */
 export function textWidth(s: string, fontSize: number): number {

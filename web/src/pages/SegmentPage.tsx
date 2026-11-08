@@ -30,10 +30,18 @@ export default function SegmentPage() {
     setGlobalCfg({ ...data.global, params: structuredClone(data.global.params) });
   };
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+
   useEffect(() => {
-    load().catch((err) => push("error", err instanceof Error ? err.message : "加载失败"));
+    setLoadError(null);
+    load().catch((err) => {
+      const msg = err instanceof Error ? err.message : "加载失败";
+      setLoadError(msg);
+      push("error", msg);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [retryTick]);
 
   const saveGlobal = async () => {
     if (!globalCfg) return;
@@ -81,7 +89,14 @@ export default function SegmentPage() {
       </p>
 
       {!bundle || !globalCfg ? (
-        <Spinner />
+        loadError !== null ? (
+          <div className="flex flex-col items-center gap-3 py-16 text-sm text-stone-500">
+            <div>加载失败：{loadError}</div>
+            <Button variant="outline" size="sm" onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+          </div>
+        ) : (
+          <Spinner />
+        )
       ) : (
         <div className="space-y-6">
           <section className="rounded-xl border border-stone-200 bg-white p-5">

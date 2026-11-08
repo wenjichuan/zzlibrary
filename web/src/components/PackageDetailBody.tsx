@@ -3,7 +3,8 @@ import { prettyDisplayDate } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail, type PackageDetail } from "@zzlibrary/shared/client";
 import FileRow from "./FileRow";
 
-function fmtPath(p: { l1?: { name: string } | null; l2?: { name: string } | null; l3?: { name: string } | null }): string {
+/** 分类路径显示（l1/l2/l3 用 / 连接）——全应用单源（详情体与资料包表格共用）。 */
+export function fmtPath(p: { l1?: { name: string } | null; l2?: { name: string } | null; l3?: { name: string } | null }): string {
   return [p.l1?.name, p.l2?.name, p.l3?.name].filter(Boolean).join("/");
 }
 
@@ -45,7 +46,7 @@ export default function PackageDetailBody({
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-[160px_1fr]">
         <div>
-          <img src={api.packageCoverUrl(detail.id)} alt="" className="h-52 w-40 rounded-lg object-cover shadow" />
+          <img src={api.packageCoverUrl(detail.id)} alt="" loading="lazy" decoding="async" className="h-52 w-40 rounded-lg object-cover shadow" />
         </div>
         <div className="min-w-0 space-y-2 text-sm">
           <div className="text-base font-semibold text-stone-800">{detail.title}</div>

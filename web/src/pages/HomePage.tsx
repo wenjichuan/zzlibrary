@@ -3,12 +3,14 @@ import { Link } from "react-router-dom";
 import { api, type ShelvesDetail, type Stats } from "@zzlibrary/shared/client";
 import { Button, PageHeader, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
+import { useToast } from "../stores/toast";
 
 export default function HomePage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [shelvesByL1, setShelvesByL1] = useState<Record<string, ShelvesDetail>>({});
   const tree = useCategories((s) => s.tree);
   const load = useCategories((s) => s.load);
+  const { push } = useToast();
 
   useEffect(() => {
     load();
@@ -16,10 +18,13 @@ export default function HomePage() {
 
   // 轻统计端点（COUNT×5），不再拉 100 包列表——旧做法文件总数超过 100 包就是错的
   useEffect(() => {
-    void api.stats().then(setStats).catch(() => undefined);
-  }, []);
+    void api
+      .stats()
+      .then(setStats)
+      .catch((err) => push("error", err instanceof Error ? err.message : "统计加载失败"));
+  }, [push]);
 
-  // 概览卡：SQL 聚合计数的轻载荷（零包体零 N+1），并行拉取
+  // 概览卡：SQL 聚合计数的轻载荷（零包体零 N+1），并行拉取；失败不再静默吞掉（卡片缺位至少有提示）
   useEffect(() => {
     void Promise.all(
       tree.map((node) =>
@@ -29,9 +34,11 @@ export default function HomePage() {
           .catch(() => null),
       ),
     ).then((rows) => {
-      setShelvesByL1(Object.fromEntries(rows.filter((r): r is [number, ShelvesDetail] => r !== null)));
+      const ok = rows.filter((r): r is [number, ShelvesDetail] => r !== null);
+      if (ok.length === 0 && tree.length > 0) push("error", "分类概览加载失败");
+      setShelvesByL1(Object.fromEntries(ok));
     });
-  }, [tree]);
+  }, [tree, push]);
 
   const totalPackages = stats?.packages ?? "…";
   const totalFiles = stats?.files ?? "…";

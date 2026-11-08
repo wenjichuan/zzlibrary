@@ -1,14 +1,16 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
+import { Spinner } from "./components/ui";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import PackagesPage from "./pages/PackagesPage";
 import UploadPage from "./pages/UploadPage";
-import CategoriesPage from "./pages/CategoriesPage";
-import SegmentPage from "./pages/SegmentPage";
-import SettingsPage from "./pages/SettingsPage";
 import LibraryPage from "./pages/LibraryPage";
+// 低频管理页懒加载：切出主入口 bundle（重库本就动态 import，这里补齐页面层代码分割）
+const CategoriesPage = lazy(() => import("./pages/CategoriesPage"));
+const SegmentPage = lazy(() => import("./pages/SegmentPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 import { useAuth } from "./stores/auth";
 import { ToastProvider } from "./stores/toast";
 
@@ -40,9 +42,9 @@ export default function App() {
         <Route path="/shelves/:l1Id" element={<Protected><LibraryPage /></Protected>} />
         <Route path="/packages" element={<Protected><PackagesPage /></Protected>} />
         <Route path="/upload" element={<Protected><UploadPage /></Protected>} />
-        <Route path="/categories" element={<Protected><CategoriesPage /></Protected>} />
-        <Route path="/segments" element={<Protected><SegmentPage /></Protected>} />
-        <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
+        <Route path="/categories" element={<Protected><Suspense fallback={<Spinner />}><CategoriesPage /></Suspense></Protected>} />
+        <Route path="/segments" element={<Protected><Suspense fallback={<Spinner />}><SegmentPage /></Suspense></Protected>} />
+        <Route path="/settings" element={<Protected><Suspense fallback={<Spinner />}><SettingsPage /></Suspense></Protected>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ToastProvider>

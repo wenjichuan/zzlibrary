@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { api, formatBytes } from "@zzlibrary/shared/client";
 import type { BackupReport } from "@zzlibrary/shared/client";
-import { Button, Input } from "../components/ui";
+import { Button, Input, PageHeader } from "../components/ui";
 import { useToast } from "../stores/toast";
 import { renderPdfCoverFromFile } from "../utils/pdfCover";
 
@@ -52,14 +52,14 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 p-6">
-      <header>
-        <h1 className="text-lg font-semibold text-stone-800">设置 · 维护与备份</h1>
-        <p className="mt-1 text-sm text-stone-500">
+    <div className="mx-auto max-w-2xl space-y-5 px-6 py-6">
+      <div>
+        <PageHeader title="设置 · 维护与备份" />
+        <p className="-mt-3 text-sm text-stone-500">
           资料全部保存在本机。定期「备份整库」到其他磁盘或移动硬盘，防丢设备丢资料；
           跨设备云同步将在后续版本提供。
         </p>
-      </header>
+      </div>
 
       <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 text-sm">
         <div className="font-semibold text-stone-700">备份整库</div>

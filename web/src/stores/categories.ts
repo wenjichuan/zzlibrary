@@ -65,10 +65,9 @@ export const useCategories = create<CategoriesState>((set, get) => ({
   removeNode: (id) => set((s) => ({ tree: removeById(s.tree, id) })),
 }));
 
-/** 扁平化：一级/二级/三级列表。 */
+/** 扁平化：一级/二级列表（三级无消费方，不再计算）。 */
 export function flatten(tree: CategoryNode[]) {
   const l1 = tree;
   const l2 = tree.flatMap((n) => n.children);
-  const l3 = l2.flatMap((n) => n.children);
-  return { l1, l2, l3 };
+  return { l1, l2 };
 }

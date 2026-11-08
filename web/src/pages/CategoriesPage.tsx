@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type CategoryNode } from "@zzlibrary/shared/client";
-import { Button, Input, PageHeader, Spinner } from "../components/ui";
+import { Button, Input, Modal, PageHeader, Spinner } from "../components/ui";
 import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
 
@@ -134,9 +134,7 @@ export default function CategoriesPage() {
                   </option>
                 ))}
               </select>
-              <button className="rounded px-1.5 py-1 text-stone-500 hover:bg-red-50 hover:text-red-600" onClick={() => void remove(node)}>
-                删除
-              </button>
+              <Button variant="danger" size="sm" onClick={() => void remove(node)}>删除</Button>
             </div>
           )}
         </div>
@@ -167,24 +165,22 @@ export default function CategoriesPage() {
       </div>
 
       {creatingUnder !== undefined && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onMouseDown={(e) => e.target === e.currentTarget && setCreatingUnder(undefined)}>
-          <div className="zz-fade-in w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
-            <h3 className="mb-4 text-base font-semibold text-stone-800">
-              {creatingUnder === null ? "新建一级分类" : `在「${tree.flatMap(findName(creatingUnder)).join("")}」下新建子分类`}
-            </h3>
-            <Input
-              autoFocus
-              placeholder="分类名称"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void create()}
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCreatingUnder(undefined)}>取消</Button>
-              <Button onClick={() => void create()} disabled={!newName.trim()}>创建</Button>
-            </div>
+        <Modal
+          title={creatingUnder === null ? "新建一级分类" : `在「${tree.flatMap(findName(creatingUnder)).join("")}」下新建子分类`}
+          onClose={() => setCreatingUnder(undefined)}
+        >
+          <Input
+            autoFocus
+            placeholder="分类名称"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void create()}
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setCreatingUnder(undefined)}>取消</Button>
+            <Button onClick={() => void create()} disabled={!newName.trim()}>创建</Button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

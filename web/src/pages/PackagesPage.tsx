@@ -7,7 +7,7 @@ import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
 import { prettyDate } from "../components/shelfVM";
 import { useReaderOverlay } from "../components/ReaderOverlay";
-import PackageDetailBody from "../components/PackageDetailBody";
+import PackageDetailBody, { fmtPath } from "../components/PackageDetailBody";
 import { FORMAT_ICONS } from "../components/FileRow";
 import { renderPdfCover } from "../utils/pdfCover";
 
@@ -49,10 +49,6 @@ function PageJump({ page, totalPages, onPage }: { page: number; totalPages: numb
       <span>/ {totalPages}</span>
     </span>
   );
-}
-
-function formatPath(p: { l1?: { name: string } | null; l2?: { name: string } | null; l3?: { name: string } | null }): string {
-  return [p.l1?.name, p.l2?.name, p.l3?.name].filter(Boolean).join("/");
 }
 
 export default function PackagesPage() {
@@ -140,13 +136,8 @@ export default function PackagesPage() {
 
   const { openReader, readerNode } = useReaderOverlay(detail, openDetailById);
 
-  const openDetail = async (pkg: Package) => {
-    try {
-      setDetail(await api.getPackage(pkg.id));
-    } catch (err) {
-      push("error", err instanceof Error ? err.message : "加载失败");
-    }
-  };
+  /** 封面点击开详情：走 openDetailById 同一实现（顺带补丁列表行状态，不再维护两份近重复逻辑） */
+  const openDetail = (pkg: Package) => void openDetailById(pkg.id);
 
   const openEdit = async (pkg: Package) => {
     try {
@@ -259,6 +250,8 @@ export default function PackagesPage() {
                     <img
                       src={api.packageCoverUrl(pkg.id)}
                       alt=""
+                      loading="lazy"
+                      decoding="async"
                       className="h-14 w-10 cursor-pointer rounded object-cover"
                       onClick={() => void openDetail(pkg)}
                     />
@@ -273,8 +266,8 @@ export default function PackagesPage() {
                   </td>
                   <td className="px-4 py-2.5 text-xs text-stone-600">
                     {pkg.classifications.length > 0 ? (
-                      <span title={pkg.classifications.map(formatPath).join("\n")}>
-                        {pkg.classifications.map(formatPath).join(" · ")}
+                      <span title={pkg.classifications.map(fmtPath).join("\n")}>
+                        {pkg.classifications.map(fmtPath).join(" · ")}
                       </span>
                     ) : (
                       <span className="text-stone-400">未分类</span>
@@ -295,12 +288,8 @@ export default function PackagesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-right text-xs">
-                    <button className="mr-2 text-stone-500 hover:text-amber-700" onClick={() => void openEdit(pkg)}>
-                      编辑
-                    </button>
-                    <button className="text-stone-500 hover:text-red-600" onClick={() => void remove(pkg)}>
-                      删除
-                    </button>
+                    <Button variant="ghost" size="sm" className="mr-2" onClick={() => void openEdit(pkg)}>编辑</Button>
+                    <Button variant="danger" size="sm" onClick={() => void remove(pkg)}>删除</Button>
                   </td>
                 </tr>
               ))}
@@ -409,14 +398,15 @@ function EditModal({
   const willBeEmpty = finalCount === 0;
 
   const addFiles = async (list: FileList) => {
-    for (const file of Array.from(list)) {
+    for (const [idx, file] of Array.from(list).entries()) {
       try {
         const cover = file.name.toLowerCase().endsWith(".pdf") ? await renderPdfCover(file) : null;
         const staged = await api.stageFile(file, cover);
         setPendingAdds((prev) => [
           ...prev,
           {
-            key: `${Date.now()}-${file.name}`,
+            // idx 防同名文件同批添加时 key 撞车（UploadPage 同款写法）
+            key: `${Date.now()}-${idx}-${file.name}`,
             stageId: staged.stage_id,
             name: staged.filename,
             format: staged.format,

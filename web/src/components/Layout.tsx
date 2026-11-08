@@ -24,6 +24,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     setDrawerOpen(false);
   }, [location]);
 
+  // Esc 关抽屉
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
   return (
     <div className="flex h-full flex-col md:flex-row">
       {/* 小屏顶栏：汉堡 + 品牌（刘海安全区） */}

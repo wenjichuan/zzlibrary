@@ -47,7 +47,7 @@ export default function FileRow({
     >
       <div className="h-10 w-8 shrink-0 overflow-hidden rounded bg-stone-100">
         {file.has_cover ? (
-          <img src={api.fileCoverUrl(file.id)} className="h-full w-full object-cover" alt="" />
+          <img src={api.fileCoverUrl(file.id)} loading="lazy" decoding="async" className="h-full w-full object-cover" alt="" />
         ) : (
           <div className="flex h-full items-center justify-center text-base">{FORMAT_ICONS[file.format] ?? "📄"}</div>
         )}

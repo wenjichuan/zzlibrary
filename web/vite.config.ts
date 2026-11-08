@@ -18,6 +18,13 @@ export default defineConfig({
       "/api": "http://127.0.0.1:8000",
     },
   },
+  preview: {
+    host: true,
+    proxy: {
+      // vite preview 也带 /api 代理——生产构建验证不再静默 404
+      "/api": "http://127.0.0.1:8000",
+    },
+  },
   build: {
     outDir: "dist",
   },

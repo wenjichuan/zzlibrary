@@ -64,11 +64,9 @@ function splitList(s: string): string[] {
 export default function PackageMetaForm({
   value,
   onChange,
-  showNotes = true,
 }: {
   value: MetaFormValue;
   onChange: (v: MetaFormValue) => void;
-  showNotes?: boolean;
 }) {
   const set = (patch: Partial<MetaFormValue>) => onChange({ ...value, ...patch });
   return (
@@ -96,11 +94,9 @@ export default function PackageMetaForm({
           <Input value={value.tags} onChange={(e) => set({ tags: e.target.value })} placeholder="如：会议，架构" />
         </Field>
       </div>
-      {showNotes && (
-        <Field label="备注">
-          <Textarea value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
-        </Field>
-      )}
+      <Field label="备注">
+        <Textarea value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
+      </Field>
     </div>
   );
 }

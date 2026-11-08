@@ -5,8 +5,10 @@
   进出只由视口边缘决定——不闪现、不消失、不挪窝；
 - 点左侧架签选段跳转（滚动定位）；书脊大小变化重建长卷；
 - 楼层纵向窗口化 + 横向按视口裁剪；空档窄条悬停示年跨。 */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { api, type ShelfPackage, type ShelfSegment } from "@zzlibrary/shared/client";
+import { usePanToScroll } from "../hooks/panScroll";
+import { ViewHint } from "./ui";
 import {
   SERIF,
   dayOf,
@@ -63,7 +65,10 @@ function Spine({
   return (
     <button
       title={`${pkg.title}${pkg.publish_date ? `（${year}）` : ""}`}
-      onClick={() => onPackageClick(pkg.id)}
+      onClick={() => {
+        hover.onLeave(); // 点击开详情即收卡——预览卡（z-50）不得盖住详情抽屉（z-30），也不留 250ms 悬停计时器
+        onPackageClick(pkg.id);
+      }}
       onMouseEnter={(e) => hover.onEnter(pkg, e)}
       onMouseMove={(e) => hover.onMove(pkg, e)}
       onMouseLeave={hover.onLeave}
@@ -112,10 +117,10 @@ function FloorSegMenu({
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} />
       <div
-        className="absolute left-0 top-0 z-40 max-h-72 w-56 overflow-auto rounded-lg border border-[#c9b58c] bg-[#f6efdc] py-1 shadow-xl"
+        className="absolute left-0 top-0 z-40 max-h-72 w-56 overflow-auto rounded-lg border border-wood-line bg-wood-cream py-1 shadow-xl"
         style={{ left: LABEL_W + 6 }}
       >
-        <div className="px-3 py-1 text-[10px] text-[#8a744a]">
+        <div className="px-3 py-1 text-[10px] text-wood-mid">
           {floor.label} · 时间段（新→旧）
         </div>
         {[...segments]
@@ -124,14 +129,14 @@ function FloorSegMenu({
           .map((seg) => (
             <button
               key={seg.key}
-              className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-[#4a3a22] hover:bg-[#e5d9b8]"
+              className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-wood-ink hover:bg-wood-badge"
               onClick={() => onPick(seg)}
             >
               <span>
                 {seg.label}
                 {seg.alias ? `（${seg.alias}）` : ""}
               </span>
-              <span className="text-[10px] text-[#8a744a]">{seg.count} 包</span>
+              <span className="text-[10px] text-wood-mid">{seg.count} 包</span>
             </button>
           ))}
       </div>
@@ -139,11 +144,11 @@ function FloorSegMenu({
   );
 }
 
-/** 书脊悬停预览卡（250ms 延迟触发，由 TimelineView 持有状态）。 */
+/** 书脊悬停预览卡内容。 */
 function SpinePreviewCard({ pkg, axis }: { pkg: ShelfPackage; axis: "publish" | "ingest" }) {
   return (
     <div
-      className="pointer-events-none flex gap-2.5 rounded-lg border border-[#c9b58c] bg-white/95 p-2.5 shadow-xl"
+      className="pointer-events-none flex gap-2.5 rounded-lg border border-wood-line bg-white/95 p-2.5 shadow-xl"
       style={{ width: 228 }}
     >
       <img
@@ -172,14 +177,66 @@ function SpinePreviewCard({ pkg, axis }: { pkg: ShelfPackage; axis: "publish" | 
   );
 }
 
+/** 悬停卡宿主（叶组件 + imperative API）：显示/换书/跟手全由 ref 直驱，
+ * 不经过 TimelineView 的 state——换悬停书目时整条时间轴零重渲染；
+ * 换书重挂首帧先按最近指针定位再上屏（无 (0,0) 闪现）。 */
+export interface HoverCardApi {
+  show: (pkg: ShelfPackage, x: number, y: number) => void;
+  hide: () => void;
+  move: (x: number, y: number) => void;
+}
+const SpineHoverCard = forwardRef<HoverCardApi, { axis: "publish" | "ingest" }>(
+  function SpineHoverCard({ axis }, ref) {
+    const [pkg, setPkg] = useState<ShelfPackage | null>(null);
+    const elRef = useRef<HTMLDivElement | null>(null);
+    const pos = useRef({ x: 0, y: 0 });
+    const apply = () => {
+      const el = elRef.current;
+      if (el === null) return;
+      el.style.left = `${Math.min(pos.current.x + 14, window.innerWidth - 240)}px`;
+      el.style.top = `${Math.max(8, pos.current.y - 16)}px`;
+    };
+    useLayoutEffect(() => {
+      if (pkg !== null) apply(); // 挂载/换书首帧：定位先于上屏
+    }, [pkg]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        show: (p, x, y) => {
+          pos.current = { x, y };
+          setPkg(p); // 同引用 bail-out，不重渲染
+        },
+        hide: () => setPkg(null),
+        move: (x, y) => {
+          pos.current = { x, y };
+          apply();
+        },
+      }),
+      [],
+    );
+    if (pkg === null) return null;
+    return (
+      <div ref={elRef} className="pointer-events-none fixed z-50" style={{ left: 0, top: 0 }}>
+        <SpinePreviewCard pkg={pkg} axis={axis} />
+      </div>
+    );
+  },
+);
+
 export function TimelineView({
   rack,
   onBack,
   onPackageClick,
+  initialScrollX = 0,
+  onScrollX,
 }: {
   rack: RackVM;
   onBack: () => void;
   onPackageClick: (pkgId: number) => void;
+  /** 进架时恢复的横向滚动位置（LibraryPage 按架记忆，返回侧视再进来不丢位置） */
+  initialScrollX?: number;
+  /** 滚动时实时上报横向位置（供记忆——卸载时机不可靠：passive cleanup 时 ref 已摘、节点可能已换） */
+  onScrollX?: (x: number) => void;
 }) {
   const [scale, setScale] = useState(1); // 书脊大小缩放（按钮，物理尺寸；变化后重建长卷）
   const [axis, setAxis] = useState<"publish" | "ingest">("publish"); // X 轴模式：发布时间 / 入库时间
@@ -218,110 +275,65 @@ export function TimelineView({
   );
   const canvasW = axisData ? axisData.totalW : 0;
 
-  // 拖拽 = 滚动（横向卷内层 1:1 跟手、纵向滚外层）；拖动超过 4px 吞掉随之而来的 click（不误触书脊）
-  const dragRef = useRef<{ x0: number; y0: number; sl0: number; st0: number; moved: boolean } | null>(
-    null,
-  );
-  const onPanStart = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    const inner = scrollRef.current;
-    const outer = outerRef.current;
-    if (!inner || !outer) return;
-    dragRef.current = {
-      x0: e.clientX,
-      y0: e.clientY,
-      sl0: inner.scrollLeft,
-      st0: outer.scrollTop,
-      moved: false,
-    };
-  };
-  const onPanMove = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    const inner = scrollRef.current;
-    const outer = outerRef.current;
-    if (!d || !inner || !outer) return;
-    const dx = e.clientX - d.x0;
-    const dy = e.clientY - d.y0;
-    if (!d.moved) {
-      if (Math.hypot(dx, dy) < 4) return;
-      d.moved = true;
-      outer.style.cursor = "grabbing";
-      outer.style.userSelect = "none";
-    }
-    inner.scrollLeft = d.sl0 - dx; // 反向轴下内容随手移动：向右拖看更早
-    outer.scrollTop = d.st0 - dy;
-    // 程序性赋值 scrollLeft 在部分环境（IAB webview）不触发 scroll 事件——同步兜底更新视口状态
-    setVp((prev) => ({ ...prev, x: inner.scrollLeft, y: outer.scrollTop }));
-  };
-  const onPanEnd = () => {
-    const d = dragRef.current;
-    dragRef.current = null;
-    const outer = outerRef.current;
-    if (outer) {
-      outer.style.cursor = "";
-      outer.style.userSelect = "";
-    }
-    if (d?.moved) {
-      outer?.addEventListener(
-        "click",
-        (ev) => {
-          ev.stopPropagation();
-          ev.preventDefault();
-        },
-        { capture: true, once: true },
+  // 拖拽 = 滚动（横向卷内层 1:1 跟手、纵向滚外层）；共享钩子（与排视图同一实现）
+  const { onPanStart, onPanMove, onPanEnd } = usePanToScroll(
+    { inner: scrollRef, outer: outerRef },
+    // 程序性赋值 scrollLeft 在部分环境（IAB webview）不触发 scroll 事件——同步兜底更新视口状态；
+    // 带相等性守卫（与滚动监听路径同款）：拖拽期间 ~60 move/s 不应等于 60 次全视图重渲染
+    () => {
+      const inner = scrollRef.current;
+      const outer = outerRef.current;
+      if (!inner || !outer) return;
+      setVp((prev) =>
+        prev.x === inner.scrollLeft && prev.y === outer.scrollTop
+          ? prev
+          : { ...prev, x: inner.scrollLeft, y: outer.scrollTop },
       );
-    }
-  };
+    },
+  );
 
-  // 书脊 hover 预览卡（250ms 延迟，避免扫过时闪烁）
-  // 位置跟手用 ref 直改 DOM（mousemove 每秒 60+ 次，进 React state 会整视图重渲染）；
-  // 只有「换了哪本书」才 setState。
+  // 书脊 hover 预览卡（250ms 延迟，避免扫过时闪烁）。
+  // 卡片是叶组件（SpineHoverCard，imperative API）——显示/换书/跟手全走 ref，
+  // 时间轴视图根零重渲染；换书首帧先定位再上屏（无 (0,0) 闪现）。
   // 悬停只服务真鼠标（hover:hover 细指针）——触屏 tap 会派发合成鼠标事件：
   // 卡片左上角闪现（挂载竞态）→ 合成 mouseleave 立即清卡 → 卡片盖在手指下抢走 click（详情打不开）。
   // 触屏上点书脊直接走 onClick 开详情，不经过预览卡。
   const canHover =
     typeof window !== "undefined" &&
     window.matchMedia?.("(hover: hover) and (pointer: fine)").matches === true;
-  const [hoverPkg, setHoverPkg] = useState<ShelfPackage | null>(null);
   const hoverTimer = useRef<number | null>(null);
-  const hoverCardRef = useRef<HTMLDivElement | null>(null);
-  const lastPointer = useRef({ x: 0, y: 0 });
-  const positionHoverCard = (x: number, y: number) => {
-    const el = hoverCardRef.current;
-    if (el === null) return;
-    el.style.left = `${Math.min(x + 14, window.innerWidth - 240)}px`;
-    el.style.top = `${Math.max(8, y - 16)}px`;
-  };
-  // 挂载首帧先定位再上屏——修「先渲染在 (0,0) 再被 move 定位」的左上角闪现竞态
-  useLayoutEffect(() => {
-    if (hoverPkg !== null) positionHoverCard(lastPointer.current.x, lastPointer.current.y);
-  }, [hoverPkg]);
+  const hoverCard = useRef<HoverCardApi | null>(null);
+  // 卸载清残留定时器（250ms 窗口内退出视图不再打到已卸载组件）
+  useEffect(() => () => {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+  }, []);
   const hoverHandlers = useMemo<SpineHoverHandlers>(
     () => ({
       onEnter: (pkg, e) => {
         if (!canHover) return;
         if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-        lastPointer.current = { x: e.clientX, y: e.clientY };
         const x = e.clientX;
         const y = e.clientY;
-        hoverTimer.current = window.setTimeout(() => {
-          setHoverPkg(pkg);
-          positionHoverCard(x, y);
-        }, 250);
+        hoverTimer.current = window.setTimeout(() => hoverCard.current?.show(pkg, x, y), 250);
       },
       onMove: (pkg, e) => {
         if (!canHover) return;
-        lastPointer.current = { x: e.clientX, y: e.clientY };
-        positionHoverCard(e.clientX, e.clientY);
-        if (hoverPkg?.id !== pkg.id) setHoverPkg(pkg); // 换书才进 state
+        const h = hoverCard.current;
+        if (h === null) return;
+        h.move(e.clientX, e.clientY); // 跟手直改 DOM（state 仅在换书时变化且同引用 bail-out）
+        h.show(pkg, e.clientX, e.clientY);
       },
       onLeave: () => {
         if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-        setHoverPkg(null);
+        hoverCard.current?.hide();
       },
     }),
-    [hoverPkg, canHover],
+    [canHover],
   );
+
+  // 滚动回调经 ref 取用（滚动监听只挂一次不重挂）
+  const onScrollXRef = useRef(onScrollX);
+  onScrollXRef.current = onScrollX;
 
   // 视口状态：纵向窗口化（外层 scrollTop/clientHeight）+ 横向裁剪（内层 scrollLeft/clientWidth）
   const [vp, setVp] = useState({ y: 0, x: 0, w: 1200, h: 1600, floorsTop: 0 });
@@ -345,8 +357,11 @@ export function TimelineView({
           : { y: outer.scrollTop, x: inner.scrollLeft, w: inner.clientWidth, h: outer.clientHeight, floorsTop },
       );
     };
+    // 滚动位置实时上报（滚动记忆走实时 Map.set，卸载时机不可靠）
+    const reportScroll = () => onScrollXRef.current?.(inner.scrollLeft);
     update();
     inner.addEventListener("scroll", update, { passive: true });
+    inner.addEventListener("scroll", reportScroll, { passive: true });
     outer.addEventListener("scroll", update, { passive: true });
     const ro = new ResizeObserver(update);
     ro.observe(inner);
@@ -354,16 +369,27 @@ export function TimelineView({
     if (fl) ro.observe(fl);
     return () => {
       inner.removeEventListener("scroll", update);
+      inner.removeEventListener("scroll", reportScroll);
       outer.removeEventListener("scroll", update);
       ro.disconnect();
     };
   }, [rack.key]);
 
-  // 切换书架/轴模式：长卷回到最新端（左缘）
+  // 首次进架：恢复记忆的滚动位置（无记忆=左缘最新端）；切轴仍回左缘（两种轴坐标不同源）
   useEffect(() => {
     const el = scrollRef.current;
+    if (el) el.scrollLeft = initialScrollX;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rack.key]);
+
+  // 切轴回左缘——但跳过挂载首跑（否则会覆盖上面恢复的滚动位置）
+  const axisInitRef = useRef(axis);
+  useEffect(() => {
+    if (axisInitRef.current === axis) return;
+    axisInitRef.current = axis;
+    const el = scrollRef.current;
     if (el) el.scrollLeft = 0;
-  }, [rack.key, axis]);
+  }, [axis]);
 
   // 层高（长卷模型：层高与视口无关）。立柱与长卷是两列各自渲染，行高必须由同一公式给定：
   // = max(层体内容高, 架签文字所需高, 空层最小高)——立柱行/长卷行/窗口化偏移三方共用
@@ -374,8 +400,10 @@ export function TimelineView({
     const n = axis === "publish" ? fa.floor.dated.length : fa.floor.total;
     return textWidth(`${label}（${n}）`, 13) * 1.18 + 6; // vertical-rl 竖排：字高≈文本宽
   };
+  // 层体高（有书=书高+10；空层=矮位 0.6 倍）——行高计算/立柱占位/层体渲染三处共用，公式单源
+  const floorBodyH = (fa: (typeof floorAxes)[number]) => (fa.books.length > 0 ? bookH + 10 : bookH * 0.6);
   const rowHs = floorAxes.map((fa) => {
-    const bodyH = fa.books.length ? bookH + 10 : bookH * 0.6;
+    const bodyH = floorBodyH(fa);
     return Math.max(bodyH + 22 + 18, chipTextH(fa), fa.books.length ? 0 : Math.max(bookH + 30, 84));
   });
   const offsets: number[] = [];
@@ -418,26 +446,26 @@ export function TimelineView({
   };
 
   return (
-    <div className="flex h-full flex-col bg-[#f4efe4]">
+    <div className="flex h-full flex-col bg-paper">
       {/* 头部 */}
-      <div className="flex items-center gap-3 border-b border-[#d8cdb4] bg-[#efe7d4]/80 px-5 py-3">
+      <div className="flex items-center gap-3 border-b border-paper-line bg-paper-deep/80 px-5 py-3">
         <button
           onClick={onBack}
-          className="rounded-lg border border-[#c9b58c] bg-[#f6efdc] px-3 py-1.5 text-xs text-[#4a3a22] transition-colors hover:border-[#8a6c3c] hover:bg-[#f0e4c4]"
+          className="rounded-lg border border-wood-line bg-wood-cream px-3 py-1.5 text-xs text-wood-ink transition-colors hover:border-wood hover:bg-wood-cream-hover"
         >
           ← 返回侧视
         </button>
-        <span className="text-sm font-semibold text-[#3d2c12]" style={{ fontFamily: SERIF }}>
+        <span className="text-sm font-semibold text-wood-deep" style={{ fontFamily: SERIF }}>
           {rack.label}
         </span>
-        <span className="rounded-full bg-[#e5d9b8] px-2 py-0.5 text-xs text-[#6b5426]">{rack.total} 包</span>
+        <span className="rounded-full bg-wood-badge px-2 py-0.5 text-xs text-wood-ink-soft">{rack.total} 包</span>
         {effRange && axisData && (
           <span className="hidden text-[11px] text-stone-400 md:inline zz-hide-short">
             {`视口 ${yearLabel(yearOf(viewT1))} – ${yearLabel(yearOf(viewT0))}（全范围 ${yearLabel(yearOf(fullT0))} – ${yearLabel(yearOf(fullT1))}）`}
           </span>
         )}
         {/* 轴模式切换：发布时间（各层独立分段）/ 入库时间（共用日历分段）——核心功能，全尺寸保留 */}
-        <div className="ml-3 flex overflow-hidden rounded border border-[#c9b58c] text-[11px] leading-none">
+        <div className="ml-3 flex overflow-hidden rounded border border-wood-line text-[11px] leading-none">
           {(
             [
               ["publish", "按发布时间"],
@@ -448,8 +476,8 @@ export function TimelineView({
               key={mode}
               className={`px-2 py-1 transition-colors ${
                 axis === mode
-                  ? "bg-[#8a6c3c] text-[#f6efdc]"
-                  : "bg-[#f6efdc] text-[#4a3a22] hover:bg-[#f0e4c4]"
+                  ? "bg-wood text-wood-cream"
+                  : "bg-wood-cream text-wood-ink hover:bg-wood-cream-hover"
               }`}
               onClick={() => setAxis(mode)}
             >
@@ -460,14 +488,16 @@ export function TimelineView({
         <div className="ml-auto flex items-center gap-1 text-xs text-stone-500">
           书脊
           <button
-            className="rounded border border-[#c9b58c] bg-[#f6efdc] px-2 py-0.5 text-[#4a3a22] hover:border-[#8a6c3c]"
+            aria-label="缩小书脊"
+            className="rounded border border-wood-line bg-wood-cream px-3 py-1 text-wood-ink hover:border-wood"
             onClick={() => setScale((s) => Math.max(0.6, +(s - 0.2).toFixed(1)))}
           >
             －
           </button>
-          <span className="w-8 text-center">{Math.round(scale * 100)}%</span>
+          <span className="w-8 text-center" aria-live="off">{Math.round(scale * 100)}%</span>
           <button
-            className="rounded border border-[#c9b58c] bg-[#f6efdc] px-2 py-0.5 text-[#4a3a22] hover:border-[#8a6c3c]"
+            aria-label="放大书脊"
+            className="rounded border border-wood-line bg-wood-cream px-3 py-1 text-wood-ink hover:border-wood"
             onClick={() => setScale((s) => Math.min(2.0, +(s + 0.2).toFixed(1)))}
           >
             ＋
@@ -477,15 +507,15 @@ export function TimelineView({
 
       {/* 顶部：操作提示（放滚动区外——界面说明不随横滚滑动、不作为拖拽起点）；
           手机/矮视口隐藏（提示是鼠标语义，触屏不适用且挤占书脊高度） */}
-      <div className="hidden px-5 pb-1 text-[11px] leading-4 text-stone-400 md:block zz-hide-short">
+      <ViewHint className="px-5 pb-1 text-[11px] leading-4 text-stone-500">
         拖拽=平移长卷 · 滚轮=上下浏览 · 悬停书脊=预览 · 点击书脊=详情 · 点架签=选段跳转
-      </div>
+      </ViewHint>
       {/* 时间轴主体（M3.17 立柱出卷）：外层纵向滚动；内部两列——立柱（不随横向滚动）+ 长卷（内层横向滚动）。
           两列同一纵向文档流、共用 rowHs 行高 → 架签与层板天然同行对齐；无 sticky、无悬浮遮盖，
           长卷坐标=内层滚动坐标（无偏移换算）。触屏两轴原生滚动都放行，自定义拖拽兜底驱动两容器 */}
       <div
         ref={outerRef}
-        className="min-h-0 flex-1 touch-pan-y overflow-y-auto"
+        className="min-h-0 flex-1 touch-pan-y overscroll-contain overflow-y-auto"
         onPointerDown={onPanStart}
         onPointerMove={onPanMove}
         onPointerUp={onPanEnd}
@@ -495,7 +525,7 @@ export function TimelineView({
         <div className="flex py-3">
           {/* 立柱：轴区占位 + 各层竖排架签（普通列）。border-r=立板边线，层板底线左端搭在其上 */}
           <div
-            className="shrink-0 border-r border-[#c9b58c]/70 bg-[#f4efe4] pl-5 pr-2"
+            className="shrink-0 border-r border-wood-line/70 bg-paper pl-5 pr-2"
             style={{ width: RAIL_W }}
           >
             {/* 与长卷「轴线(12) + mt-1(4)」等高的占位 */}
@@ -504,17 +534,26 @@ export function TimelineView({
             {floorAxes.slice(firstIdx, lastIdx + 1).map((fa, idx) => {
               const fi = firstIdx + idx;
               const floor = fa.floor;
-              const bodyH = fa.books.length ? bookH + 10 : bookH * 0.6;
+              const bodyH = floorBodyH(fa);
               return (
                 <div
                   key={fi}
                   className="relative flex items-center justify-center"
                   style={{ height: rowHs[fi], marginBottom: FLOOR_GAP }}
                 >
-                  {/* 竖排架签：点击展开该层的时间段列表（跳转=滚动定位） */}
+                  {/* 竖排架签：点击/回车展开该层的时间段列表（跳转=滚动定位）——键盘可操作（role+tabIndex+Enter/Space） */}
                   <div
-                    className="flex cursor-pointer items-center justify-center rounded-[3px] transition-colors hover:border-[#8a6c3c]"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`选择「${floor.label}」的时间段`}
+                    className="flex cursor-pointer items-center justify-center rounded-[3px] transition-colors hover:border-wood"
                     onClick={() => setSegMenu(segMenu === fi ? null : fi)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSegMenu(segMenu === fi ? null : fi);
+                      }
+                    }}
                     style={{
                       // minHeight（非 height）+ nowrap：放不下让架签长高，
                       // 绝不压缩折行——vertical-rl 折行后行序从右往左，视觉上字序会颠倒（埃及→及埃）
@@ -536,7 +575,7 @@ export function TimelineView({
                     }
                   >
                     {floor.label.length > 6 ? floor.label.slice(0, 6) + "…" : floor.label}
-                    <span className="text-[10px] tracking-normal text-[#8a744a]">
+                    <span className="text-[10px] tracking-normal text-wood-mid">
                       （{axis === "publish" ? floor.dated.length : floor.total}）
                     </span>
                   </div>
@@ -564,7 +603,8 @@ export function TimelineView({
               段带/书脊/空档条直接用 x，无任何偏移换算 */}
           <div
             ref={scrollRef}
-            className="min-w-0 flex-1 overflow-x-auto [touch-action:pan-x_pan-y]"
+            data-testid="tl-inner"
+            className="min-w-0 flex-1 overflow-x-auto [touch-action:pan-x_pan-y] overscroll-contain"
           >
             <div className="pr-5" style={{ width: canvasW ? canvasW + 20 : undefined }}>
               {/* 顶部细轴线（随长卷滚动，无刻度） */}
@@ -594,7 +634,7 @@ export function TimelineView({
                 {floorAxes.slice(firstIdx, lastIdx + 1).map((fa, idx) => {
                   const fi = firstIdx + idx;
                   const floor = fa.floor;
-                  const bodyH = fa.books.length ? bookH + 10 : bookH * 0.6;
+                  const bodyH = floorBodyH(fa);
                   const bands = axisData?.bands[fi] ?? [];
                   const spines: PlacedSpine[] = axisData?.spines[fi] ?? [];
                   return (
@@ -708,18 +748,14 @@ export function TimelineView({
       </div>
 
       {/* 底部：读图要领（随轴模式变化）——放滚动区外（放长卷列里会跟 canvasW 变窄折行）；手机/矮视口隐藏让位书脊 */}
-      <div className="hidden px-5 pb-2 pt-1 text-[11px] leading-4 text-stone-400 md:block zz-hide-short">
+      <ViewHint className="px-5 pb-2 pt-1 text-[11px] leading-4 text-stone-500">
         {axis === "publish"
           ? "弹性时间轴：书多的年代长、书少的年代短；跨层同列≈同一时代 · 空档=该时代无产出或未收录（悬停示年跨） · 未注明时间不上轴（资料包页可补全）"
           : "入库时间轴：所有层共用日历分段，同月同列"}
-      </div>
+      </ViewHint>
 
-      {/* 书脊悬停预览卡 */}
-      {hoverPkg && (
-        <div ref={hoverCardRef} className="fixed z-50" style={{ left: 0, top: 0 }}>
-          <SpinePreviewCard pkg={hoverPkg} axis={axis} />
-        </div>
-      )}
+      {/* 书脊悬停预览卡（叶组件，ref 直驱） */}
+      <SpineHoverCard ref={hoverCard} axis={axis} />
     </div>
   );
 }
