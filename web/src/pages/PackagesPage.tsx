@@ -454,16 +454,19 @@ function EditModal({
         onSaved(null);
         return;
       }
-      // 文件增删一次批量请求（事务内原子完成，无「部分生效」中间态）
-      const afterFiles = await api.applyPackageFiles(
-        detail.id,
-        removedFiles.map((f) => f.id),
-        pendingAdds.map((a) => a.stageId),
-      );
+      // 文件增删一次批量请求（事务内原子完成，无「部分生效」中间态）；
+      // 无文件改动时跳过——空批量会被服务端 422「没有任何变更」拒绝，只改元数据的保存走不到 PATCH
+      if (removedFiles.length + pendingAdds.length > 0) {
+        await api.applyPackageFiles(
+          detail.id,
+          removedFiles.map((f) => f.id),
+          pendingAdds.map((a) => a.stageId),
+        );
+      }
       setPendingAdds([]); // 已入包，暂存被后端清除
       const fresh = await api.updatePackage(detail.id, metaToInput({ ...form, title }));
       push("success", "已保存");
-      onSaved(fresh.id === afterFiles.id ? fresh : afterFiles);
+      onSaved(fresh);
     } catch (err) {
       push("error", err instanceof Error ? err.message : "保存失败（部分改动可能已生效，请重试）");
       discardPending(); // 未入包的暂存立即废弃，避免残留
