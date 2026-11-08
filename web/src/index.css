@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/* 书房场景设计令牌（Tailwind 4 @theme → 生成 bg-paper / text-wood-ink / border-wood-line 等工具类）。
+ * 此前 ~70 处 hex 字面量散在 TimelineView/aisleView，改色需全文替换；一次性渐变中间色保留字面量。 */
+@theme {
+  --color-paper: #f4efe4; /* 书房底色 */
+  --color-paper-deep: #efe7d4; /* 书房头部/深一档底 */
+  --color-paper-line: #d8cdb4; /* 书房分隔线 */
+  --color-wood: #8a6c3c; /* 主木色（激活态） */
+  --color-wood-cream: #f6efdc; /* 木件浅米（按钮/面板底） */
+  --color-wood-cream-hover: #f0e4c4; /* 浅米悬停 */
+  --color-wood-line: #c9b58c; /* 木件描线（黄铜） */
+  --color-wood-badge: #e5d9b8; /* 徽章底 */
+  --color-wood-ink: #4a3a22; /* 木件主文字 */
+  --color-wood-ink-soft: #6b5426; /* 木件次文字 */
+  --color-wood-deep: #3d2c12; /* 木件最深文字（架名） */
+  --color-wood-mid: #8a744a; /* 木件三级文字 */
+}
+
+:root {
+  --zz-bg: #f7f4ef;
+  --zz-ink: #2b2622;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--zz-bg);
+  color: var(--zz-ink);
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+}
+
+/* 键盘可见焦点基线（鼠标点击不显示，Tab 导航清晰可辨） */
+:focus-visible {
+  outline: 2px solid #b45309;
+  outline-offset: 2px;
+}
+
+/* 触屏：交互元素禁用双击缩放延迟（连点翻页/缩放不再触发页面放大） */
+button,
+[role="button"],
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+/* 主滚动隔离：内部滚动到头不链式带动页面、不触发 iOS 下拉刷新 */
+main {
+  overscroll-behavior: contain;
+}
+
+/* 动效减免（晕动症/低功耗偏好）：路由切换/抽屉/悬停动画全部退化为瞬时 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 细滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #d6cfc4;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes zz-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.zz-fade-in {
+  animation: zz-fade-in 0.18s ease-out;
+}
+
+/* 矮视口（横屏手机 ~300-430px 高）：说明行/次要工具让位给书脊主内容（!important 压过一切 display 类） */
+@media (max-height: 540px) {
+  .zz-hide-short {
+    display: none !important;
+  }
+}
+
+/* 浮层面板高度上限：dvh 优先（随 iOS 动态工具栏伸缩），不支持 dvh 的浏览器回退 vh。
+   注：不能写成 max-h-[90vh] max-h-[90dvh] 双类——Tailwind 任意值类同特异性，产物顺序不保证 dvh 在后。 */
+.zz-modal-h {
+  max-height: 90vh;
+}
+@supports (height: 100dvh) {
+  .zz-modal-h {
+    max-height: 90dvh;
+  }
+}

@@ -1,0 +1,17 @@
+# 构建上下文瘦身：只要源码和锁文件
+.git
+node_modules
+**/node_modules
+data
+.e2e-stress-100k
+.e2e-*
+dist-server
+dist-release
+web/dist
+*.db
+*.db-wal
+*.db-shm
+.env
+.tmp-*
+docs
+site

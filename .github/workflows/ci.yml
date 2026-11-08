@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: core tests
+        run: npm test -w @zzlibrary/core
+      - name: server tests
+        run: npm test -w @zzlibrary/server
+      - name: server typecheck
+        run: npx tsc --noEmit -p packages/server/tsconfig.json
+      - name: web build (含 tsc)
+        run: npm run build -w web
+      - name: server bundle 冒烟（打包产物可启动）
+        run: |
+          node scripts/build-server.mjs
+          ZZLIB_DATA_DIR=$(mktemp -d) ZZLIB_PORT=8390 node dist-server/index.js &
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8390/api/health && break || sleep 1
+          done
+          curl -sf http://127.0.0.1:8390/api/health | grep '"ok"'
