@@ -1,9 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [develop, release_v1.0, "feature/**"]
   pull_request:
+    branches: [develop]
 
 jobs:
   test:

@@ -2,7 +2,7 @@ name: Pages
 
 on:
   push:
-    branches: [release_v1.0]
+    branches: [develop]
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
