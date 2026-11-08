@@ -65,8 +65,6 @@ export interface Package {
 
 export interface PackageDetail extends Package {
   files: FileDetail[];
-  /** 是否有真封面（false=本地生成的占位封面；存量 PDF 补齐用） */
-  has_real_cover?: boolean;
 }
 
 export interface PackagePage {

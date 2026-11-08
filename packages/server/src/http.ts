@@ -7,7 +7,7 @@ import { cors } from "hono/cors";
 import { getCookie } from "hono/cookie";
 import type { Env } from "./env";
 import { Settings } from "./config";
-import { openDb, migrate, migratePackageDirs, purgeStaleStaging } from "./db";
+import { openDb, migrate, purgeStaleStaging } from "./db";
 import { SessionManager, SESSION_COOKIE } from "./security";
 import { recomputeAllPackageStatuses } from "./repo";
 import { authRouter } from "./routes/auth";
@@ -25,7 +25,6 @@ export function createApp(settings = new Settings()): Hono<Env> {
 
   // —— 启动期（对应 Python lifespan）——
   migrate(db);
-  migratePackageDirs(settings, db);
   const changed = recomputeAllPackageStatuses(db); // 存量对账（幂等）
   if (changed > 0) console.log(`包状态存量对账：重算了 ${changed} 个包`);
   purgeStaleStaging(settings);

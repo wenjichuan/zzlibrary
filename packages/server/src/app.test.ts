@@ -171,12 +171,19 @@ describe("列表与书架", () => {
     expect(r.json.items[0].title).toBeTruthy();
   });
 
-  it("书架聚合含新包 + 分段网格", async () => {
+  it("书架概览计数 + 进架包体（overview/rack 两级载荷）", async () => {
     const tree = await call("GET", "/api/categories");
     const l1 = tree.json[0];
-    const r = await call("GET", `/api/shelves?l1=${l1.id}&with_packages=1`);
-    expect(r.json.total).toBeGreaterThanOrEqual(1);
-    const shelf = r.json.groups[0].shelves.find((s: any) => s.l3?.name === "中国") ?? r.json.groups[0].shelves[0];
+    // 概览：轻计数（零包体），含真实段带网格
+    const ov = await call("GET", `/api/shelves/${l1.id}/overview`);
+    expect(ov.json.total).toBeGreaterThanOrEqual(1);
+    expect(ov.json.groups[0].shelves[0].segments).toBeDefined();
+    // 进架：拉该二级组的包体
+    const group = ov.json.groups.find((g: any) => g.l2 !== null) ?? ov.json.groups[0];
+    const l2Key = group.l2 === null ? "none" : String(group.l2.id);
+    const rack = await call("GET", `/api/shelves/${l1.id}/rack?l2=${l2Key}`);
+    expect(rack.json.total).toBeGreaterThanOrEqual(1);
+    const shelf = rack.json.groups[0].shelves.find((s: any) => s.l3?.name === "中国") ?? rack.json.groups[0].shelves[0];
     expect(shelf.total).toBeGreaterThanOrEqual(1);
     expect((shelf.packages ?? []).some((p: any) => p.package.publish_date === "-0221-01-01")).toBe(true);
   });
@@ -204,8 +211,10 @@ describe("分段配置", () => {
     });
     expect(r.json.mode).toBe("custom");
     const tree = await call("GET", "/api/categories");
-    const shelves = await call("GET", `/api/shelves?l1=${tree.json[0].id}`);
-    const segs = shelves.json.groups[0].shelves[0].segments;
+    const l1 = tree.json[0];
+    // 概览轻载荷即含段带网格（SQL 日期范围 + computeGrid）
+    const ov = await call("GET", `/api/shelves/${l1.id}/overview`);
+    const segs = ov.json.groups[0].shelves[0].segments;
     expect(segs.some((s: any) => s.alias === "隋唐" && s.label === "581–907")).toBe(true);
     expect(segs.some((s: any) => s.key === "other")).toBe(true);
     await call("PUT", "/api/segment-config", { mode: "year", params: {} });

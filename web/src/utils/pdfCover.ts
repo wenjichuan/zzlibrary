@@ -1,7 +1,5 @@
-/** PDF 首页封面客户端渲染（入库即带封面 + 存量补齐共用）：
+/** PDF 首页封面客户端渲染（入库路径：入库页/编辑弹窗加文件，客户端渲染随 stage 上传）：
  * 无服务端原生依赖，CP2/CP3（WebView）天然复用同一套。 */
-import { api } from "@zzlibrary/shared/client";
-
 export async function renderPdfCover(file: Blob | ArrayBuffer): Promise<Blob | null> {
   try {
     const pdfjs = await import("pdfjs-dist");
@@ -26,17 +24,6 @@ export async function renderPdfCover(file: Blob | ArrayBuffer): Promise<Blob | n
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new Blob([bytes], { type: "image/png" });
-  } catch {
-    return null;
-  }
-}
-
-/** 拉取文件字节并渲染首页封面（存量补齐用）。 */
-export async function renderPdfCoverFromFile(fileId: number): Promise<Blob | null> {
-  try {
-    const resp = await fetch(api.fileUrl(fileId), { credentials: "include" });
-    if (!resp.ok) return null;
-    return await renderPdfCover(await resp.arrayBuffer());
   } catch {
     return null;
   }

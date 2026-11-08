@@ -37,7 +37,7 @@ import {
   type PackageRow,
 } from "../repo";
 import { inTransaction, nowSqlite, pstmt } from "../db";
-import { sha256FileSync, sha256Sync } from "../hashing";
+import { sha256Sync } from "../hashing";
 import { extractMeta } from "../extract";
 import { makePlaceholderCover, normalizeCover, paletteFromCover, regeneratePackageArt } from "../art";
 
@@ -74,7 +74,6 @@ function packageDetail(
   const coverNames = new Set(safeReaddir(join(settings.artDir, "filecovers")));
   return {
     ...base,
-    has_real_cover: pkg.row.cover_sha256 !== null,
     files: pkg.files.map((f) => ({
       id: f.id,
       name: f.name,
@@ -326,8 +325,8 @@ packagesRouter.post("/api/packages", async (c) => {
     mkdirSync(pkgDir, { recursive: true });
     let order = 0;
     for (const { dir, info } of staged) {
-      // sha 优先用 stage 流式写盘时算好的；旧暂存（升级前遗留）兜底流式哈希——均不整读进内存
-      const sha = info.sha256 ?? sha256FileSync(join(dir, "file"));
+      // sha 在 stage 流式写盘时已增量算好，直接登记
+      const sha = info.sha256;
       const f = db
         .prepare(
           "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)",
@@ -465,26 +464,6 @@ packagesRouter.get("/api/packages", (c) => {
   return c.json({ total, page, page_size: pageSize, items });
 });
 
-/** 存量 PDF 封面补齐的工作清单（设置页）：无真封面且含 pdf 的包 + 首个 pdf 文件 id——轻查询，替代客户端「逐包拉完整详情」的 N+1。 */
-packagesRouter.get("/api/packages/needs-cover", (c) => {
-  const db = c.get("db");
-  const rows = db
-    .prepare(
-      "SELECT p.id AS pkg_id, p.title AS title, f.id AS file_id FROM packages p" +
-        " JOIN files f ON f.package_id = p.id AND f.format = 'pdf'" +
-        " WHERE p.cover_sha256 IS NULL ORDER BY p.id, f.sort_order, f.id",
-    )
-    .all() as Array<{ pkg_id: number; title: string; file_id: number }>;
-  const items: Array<{ pkg_id: number; title: string; file_id: number }> = [];
-  const seen = new Set<number>();
-  for (const r of rows) {
-    if (seen.has(r.pkg_id)) continue; // 一个包多个 pdf 只取第一个
-    seen.add(r.pkg_id);
-    items.push(r);
-  }
-  return c.json({ items });
-});
-
 function parseIdFilterNullable(raw: string | null | undefined): [number | null, boolean] {
   if (raw === null || raw === undefined || raw === "") return [null, false];
   if (raw === "none") return [null, true];
@@ -565,7 +544,6 @@ packagesRouter.delete("/api/packages/:id", (c) => {
   const settings = c.get("settings");
   const pkg = getPackageOr404(db, Number(c.req.param("id")));
   rmSync(packageDir(settings, pkg), { recursive: true, force: true });
-  rmSync(join(settings.filesDir, String(pkg.row.id)), { recursive: true, force: true }); // 兼容旧目录名残留
   const coverPath = join(settings.artDir, "covers", `${pkg.row.id}.png`);
   if (existsSync(coverPath)) unlinkSync(coverPath);
   const spinePath = join(settings.artDir, "spines", `${pkg.row.id}.png`);
@@ -599,7 +577,7 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
   };
 
   const maxOrder = pkg.files.reduce((m, f) => Math.max(m, f.sort_order), -1);
-  const stagedSha = info.sha256 ?? sha256FileSync(join(stagingDir, "file"));
+  const stagedSha = info.sha256; // stage 流式写盘时已算好
   const { fileId, coverImg } = inTransaction(db, () => {
     const ins = db
       .prepare(
@@ -703,7 +681,7 @@ packagesRouter.post("/api/packages/:id/files/batch", async (c) => {
     let firstCover: Buffer | null = null;
     for (const s of staged) {
       order += 1;
-      const sha = s.sha ?? sha256FileSync(join(s.dir, "file"));
+      const sha = s.sha; // stage 流式写盘时已算好
       const ins = pstmt(db, "INSERT INTO files (package_id, name, format, file_path, file_size, page_count, sort_order, sha256, local, updated_at, uuid) VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?)").run(
         pkgId, s.filename, s.format, s.size, s.pageCount, order, sha, nowSqlite(), randomUUID().replaceAll("-", ""),
       );
@@ -829,30 +807,6 @@ packagesRouter.get("/api/packages/:id/cover", async (c) => {
     writeFileSync(path, await makePlaceholderCover(pkg.row.title, palette ?? (await paletteFromCover(null, pkg.row.title))));
   }
   return serveFile(c, path, "image/png");
-});
-
-/** 客户端渲染封面上传（PDF 首页补齐）：规范化入库并更新 cover_sha256/palette。 */
-packagesRouter.put("/api/packages/:id/cover", async (c) => {
-  const db = c.get("db");
-  const settings = c.get("settings");
-  const pkgId = Number(c.req.param("id"));
-  const pkg = getPackageOr404(db, pkgId);
-  const body = await c.req.parseBody();
-  const upload = body.cover;
-  if (!(upload instanceof File)) throw new HTTPException(422, { message: "缺少 cover 文件" });
-  const raw = Buffer.from(await upload.arrayBuffer());
-  const normalized = await normalizeCover(raw, pkg.row.title);
-  mkdirSync(join(settings.artDir, "covers"), { recursive: true });
-  writeFileSync(join(settings.artDir, "covers", `${pkgId}.png`), normalized);
-  const spinePath = join(settings.artDir, "spines", `${pkgId}.png`);
-  if (existsSync(spinePath)) unlinkSync(spinePath); // 书脊按新封面重生成
-  const palette = await paletteFromCover(normalized, pkg.row.title);
-  db.prepare("UPDATE packages SET cover_sha256 = ?, palette = ? WHERE id = ?").run(
-    sha256Sync(new Uint8Array(normalized)),
-    JSON.stringify(palette),
-    pkgId,
-  );
-  return c.json({ ok: true, real: true });
 });
 
 packagesRouter.get("/api/packages/:id/spine", async (c) => {

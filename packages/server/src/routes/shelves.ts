@@ -14,7 +14,7 @@ import type { Env } from "../env";
 import { getCategory, type CategoryRow } from "../deps";
 import type { ShelvesDetail } from "@zzlibrary/shared";
 import { isoFromSqlite } from "../db";
-import type { FileRow, PackageRow } from "../repo";
+import type { PackageRow } from "../repo";
 
 export const shelvesRouter = new Hono<Env>();
 
@@ -105,7 +105,7 @@ shelvesRouter.get("/api/shelves/:l1Id/overview", (c) => {
   return c.json(buildLightShelves(db, l1) satisfies ShelvesDetail);
 });
 
-/** 单架详情（正面时间轴入口）：只装载该二级组的包（formats 批量聚合），进架才拉包体——替代整 L1 全量 with_packages。 */
+/** 单架详情（正面时间轴入口）：只装载该二级组的包（formats 批量聚合），进架才拉包体。 */
 shelvesRouter.get("/api/shelves/:l1Id/rack", (c) => {
   const db = c.get("db");
   const l1 = l1Or404(db, Number(c.req.param("l1Id")));
@@ -200,40 +200,7 @@ function l1Or404(db: Env["Variables"]["db"], l1Id: number): CategoryRow {
   return c;
 }
 
-interface RawPkg extends PackageRow {
-  __files?: FileRow[];
-  __paths?: Array<{ l1_id: number; l2_id: number | null; l3_id: number | null }>;
-}
-
-/** 加载至少一条路径属于该一级分类的包（含文件与路径）。 */
-function loadL1Packages(db: Env["Variables"]["db"], l1Id: number): AggPackage[] {
-  const rows = db
-    .prepare(
-      "SELECT * FROM packages WHERE EXISTS (SELECT 1 FROM package_paths pp WHERE pp.package_id = packages.id AND pp.l1_id = ?) ORDER BY packages.id",
-    )
-    .all(l1Id) as RawPkg[];
-  const fileStmt = db.prepare("SELECT * FROM files WHERE package_id = ? ORDER BY sort_order, id");
-  const pathStmt = db.prepare("SELECT l1_id, l2_id, l3_id FROM package_paths WHERE package_id = ? ORDER BY id");
-  return rows.map((r) => {
-    const files = fileStmt.all(r.id) as FileRow[];
-    const paths = pathStmt.all(r.id) as Array<{ l1_id: number; l2_id: number | null; l3_id: number | null }>;
-    let authors: string[] = [];
-    try {
-      authors = JSON.parse(r.authors);
-    } catch { /* 防御 */ }
-    return {
-      id: r.id,
-      title: r.title,
-      authors,
-      publish_date: r.publish_date,
-      created_at: isoFromSqlite(r.created_at),
-      file_count: r.file_count,
-      status: r.status,
-      formats: [...new Set(files.map((f) => f.format))],
-      paths,
-    };
-  });
-}
+interface RawPkg extends PackageRow {}
 
 function loadConfigRows(db: Env["Variables"]["db"]): SegmentConfigRow[] {
   return (db.prepare("SELECT scope, l2_id, l3_id, mode, params FROM segment_configs").all() as Array<
@@ -247,7 +214,7 @@ function loadConfigRows(db: Env["Variables"]["db"]): SegmentConfigRow[] {
   });
 }
 
-/** L1 组级计数（SQL 聚合，零包体）：overview 与 /api/shelves 计数路径共用。 */
+/** L1 组级计数（SQL 聚合，零包体）：overview 轻载荷的数据底座。 */
 function l1GroupCounts(
   db: Env["Variables"]["db"],
   l1Id: number,
@@ -266,20 +233,3 @@ function l1GroupCounts(
   return { groups, total };
 }
 
-shelvesRouter.get("/api/shelves", (c) => {
-  const db = c.get("db");
-  const l1Id = Number(c.req.query("l1"));
-  if (!Number.isInteger(l1Id)) throw new HTTPException(422, { message: "必须指定一级分类" });
-  const l1Cat = l1Or404(db, l1Id);
-  const includePackages = ["1", "true"].includes(c.req.query("with_packages") ?? "");
-
-  // 计数路径：SQL 聚合轻载荷（含真实段带网格；与 overview 同构）
-  if (!includePackages) {
-    return c.json(buildLightShelves(db, l1Cat) satisfies ShelvesDetail);
-  }
-
-  // with_packages 兼容路径（测试/调试用）：全量包聚合
-  const pkgs = loadL1Packages(db, l1Id);
-  const cats = collectCats(db, pkgs);
-  return c.json(buildShelves({ id: l1Cat.id, name: l1Cat.name }, pkgs, cats, loadConfigRows(db), true));
-});

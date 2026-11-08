@@ -77,8 +77,6 @@ export const api = {
   }, signal?: AbortSignal) =>
     request<PackagePage>(`/api/packages${qs(params)}`, signal ? { signal } : undefined),
   getPackage: (id: number) => request<PackageDetail>(`/api/packages/${id}`),
-  needsCoverPackages: () =>
-    request<{ items: Array<{ pkg_id: number; title: string; file_id: number }> }>("/api/packages/needs-cover"),
   updatePackage: (id: number, patch: Partial<PackageMetaInput>) =>
     request<PackageDetail>(`/api/packages/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deletePackage: (id: number) => request<{ ok: boolean }>(`/api/packages/${id}`, { method: "DELETE" }),
@@ -118,7 +116,6 @@ export const api = {
   fileUrl: (fileId: number) => `/api/files/${fileId}/file`,
 
   // shelves
-  shelves: (l1: number) => request<ShelvesDetail>(`/api/shelves${qs({ l1 })}`),
   shelvesOverview: (l1: number) => request<ShelvesDetail>(`/api/shelves/${l1}/overview`),
   shelfRack: (l1: number, l2: string) => request<ShelvesDetail>(`/api/shelves/${l1}/rack?l2=${encodeURIComponent(l2)}`),
   stats: () => request<Stats>("/api/stats"),
@@ -145,13 +142,6 @@ export const api = {
     request<Progress>(`/api/progress/${fileId}`, { method: "PUT", body: JSON.stringify({ locator, percent }) }),
   deleteProgress: (fileId: number) =>
     request<{ ok: boolean }>(`/api/progress/${fileId}`, { method: "DELETE" }),
-
-  // 客户端渲染的封面（PDF 首页）上传
-  uploadCover: (packageId: number, png: Blob) => {
-    const form = new FormData();
-    form.append("cover", png, "cover.png");
-    return request<{ ok: boolean; real: boolean }>(`/api/packages/${packageId}/cover`, { method: "PUT", body: form });
-  },
 
   // 维护与备份
   /** 整库备份到本机目录（VACUUM INTO 快照 + files/art 拷贝）。 */
