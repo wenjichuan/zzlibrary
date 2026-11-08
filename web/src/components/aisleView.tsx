@@ -86,8 +86,8 @@ export function AisleView({
   const [first, last] = win;
   return (
     <div className="flex h-full flex-col bg-[#f4efe4]">
-      {/* 说明放滚动区外（界面文字不随横/纵滚动滑动，也不作为拖拽起点），与正面时间轴口径一致 */}
-      <div className="px-8 pb-1 pt-5 text-[13px] text-stone-500" style={{ fontFamily: SERIF }}>
+      {/* 说明放滚动区外（界面文字不随横/纵滚动滑动，也不作为拖拽起点），与正面时间轴口径一致；手机/矮视口隐藏让位书架 */}
+      <div className="hidden px-8 pb-1 pt-5 text-[13px] text-stone-500 md:block zz-hide-short" style={{ fontFamily: SERIF }}>
         侧视 · 填充条=相对藏书量 · 拖拽=浏览全部书架 · 滚轮=上下浏览 · 点击书架=正面时间轴
       </div>
       <div

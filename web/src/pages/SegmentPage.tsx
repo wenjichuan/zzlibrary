@@ -166,10 +166,10 @@ function ConfigEditor({ value, onChange }: { value: SegmentConfig; onChange: (v:
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <span className="w-20 text-sm text-stone-600">分段方式</span>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <span className="w-20 shrink-0 text-sm text-stone-600">分段方式</span>
         <Select
-          className="w-44"
+          className="w-full sm:w-44"
           value={value.mode}
           onChange={(e) => onChange({ ...value, mode: e.target.value, params: {} })}
         >
@@ -202,9 +202,9 @@ function ConfigEditor({ value, onChange }: { value: SegmentConfig; onChange: (v:
             别名可选（如朝代、时期名）。
           </div>
           {ranges.map((r, i) => (
-            <div key={i} className="flex items-center gap-2">
+            <div key={i} className="flex flex-wrap items-center gap-2">
               <Input
-                className="w-32"
+                className="w-28 flex-1 sm:w-32 sm:flex-none"
                 placeholder="起始，如 581"
                 value={r.start}
                 onChange={(e) => {
@@ -215,7 +215,7 @@ function ConfigEditor({ value, onChange }: { value: SegmentConfig; onChange: (v:
               />
               <span className="text-stone-400">→</span>
               <Input
-                className="w-32"
+                className="w-28 flex-1 sm:w-32 sm:flex-none"
                 placeholder="截止，如 907"
                 value={r.end}
                 onChange={(e) => {
@@ -225,7 +225,7 @@ function ConfigEditor({ value, onChange }: { value: SegmentConfig; onChange: (v:
                 }}
               />
               <Input
-                className="w-28"
+                className="w-28 flex-1 sm:w-28 sm:flex-none"
                 placeholder="别名：隋唐"
                 value={r.alias ?? r.label ?? ""}
                 onChange={(e) => {

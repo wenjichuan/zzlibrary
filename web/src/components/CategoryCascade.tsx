@@ -24,7 +24,7 @@ export default function CategoryCascade({
   const l3Options = value.l2_id ? (l2Node?.children ?? []) : [];
 
   return (
-    <div className="grid grid-cols-3 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       <Select
         value={value.l1_id ?? ""}
         onChange={(e) => {

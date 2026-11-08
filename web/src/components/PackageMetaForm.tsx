@@ -73,7 +73,7 @@ export default function PackageMetaForm({
   const set = (patch: Partial<MetaFormValue>) => onChange({ ...value, ...patch });
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="作者" hint="逗号分隔">
           <Input value={value.authors} onChange={(e) => set({ authors: e.target.value })} placeholder="如：刘慈欣" />
         </Field>
@@ -88,7 +88,7 @@ export default function PackageMetaForm({
       <Field label="分类路径" hint="可多条，包会出现在每个所属书架">
         <ClassificationsEditor value={value.classifications} onChange={(v) => set({ classifications: v })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="发布方">
           <Input value={value.publisher} onChange={(e) => set({ publisher: e.target.value })} />
         </Field>

@@ -77,7 +77,7 @@ export function Modal({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className={`zz-fade-in max-h-[90vh] w-full ${wide ? "max-w-3xl" : "max-w-lg"} overflow-y-auto rounded-xl bg-white shadow-2xl`}
+        className={`zz-fade-in max-h-[90vh] max-h-[90dvh] w-full ${wide ? "max-w-3xl" : "max-w-lg"} overflow-y-auto rounded-xl bg-white shadow-2xl`}
       >
         <div className="sticky top-0 flex items-center justify-between border-b border-stone-200 bg-white px-5 py-3.5">
           <h2 className="text-base font-semibold text-stone-800">{title}</h2>

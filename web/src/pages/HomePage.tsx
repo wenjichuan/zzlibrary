@@ -47,7 +47,7 @@ export default function HomePage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-4 gap-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard icon="📦" label="资料包" value={totalPackages} />
         <StatCard icon="🗂" label="文件总数" value={totalFiles} />
         <StatCard icon="🏷" label="一级分类" value={tree.length} />

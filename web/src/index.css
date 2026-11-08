@@ -43,3 +43,10 @@ body {
 .zz-fade-in {
   animation: zz-fade-in 0.18s ease-out;
 }
+
+/* 矮视口（横屏手机 ~300-430px 高）：说明行/次要工具让位给书脊主内容（!important 压过一切 display 类） */
+@media (max-height: 540px) {
+  .zz-hide-short {
+    display: none !important;
+  }
+}

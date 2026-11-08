@@ -107,7 +107,7 @@ export default function CategoriesPage() {
             <span className="flex-1 truncate text-sm font-medium text-stone-800">{node.name}</span>
           )}
           {renaming?.id !== node.id && (
-            <div className="hidden items-center gap-1 text-xs group-hover:flex">
+            <div className="flex items-center gap-1 text-xs">
               {node.level < 3 && (
                 <button className="rounded px-1.5 py-1 text-stone-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => { setCreatingUnder(node.id); setNewName(""); }}>
                   ＋子分类

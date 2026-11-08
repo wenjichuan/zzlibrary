@@ -183,7 +183,7 @@ export default function PackagesPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input
-          className="w-56"
+          className="w-full sm:w-56"
           placeholder="搜索包名/作者/备注…"
           value={qText}
           onChange={(e) => setQText(e.target.value)}
@@ -191,7 +191,7 @@ export default function PackagesPage() {
             if (e.key === "Enter") applyFilters((f) => (f.q === qText ? f : { ...f, q: qText }));
           }}
         />
-        <Select className="w-32" value={filters.l1} onChange={(e) => applyFilters((f) => ({ ...f, l1: e.target.value, l2: "", l3: "" }))}>
+        <Select className="w-full sm:w-32" value={filters.l1} onChange={(e) => applyFilters((f) => ({ ...f, l1: e.target.value, l2: "", l3: "" }))}>
           <option value="">全部分类</option>
           {l1.map((n) => (
             <option key={n.id} value={n.id}>{n.name}</option>
@@ -199,7 +199,7 @@ export default function PackagesPage() {
           <option value="none">未分类</option>
         </Select>
         {filters.l1 && (
-          <Select className="w-32" value={filters.l2} onChange={(e) => applyFilters((f) => ({ ...f, l2: e.target.value, l3: "" }))}>
+          <Select className="w-full sm:w-32" value={filters.l2} onChange={(e) => applyFilters((f) => ({ ...f, l2: e.target.value, l3: "" }))}>
             <option value="">全部二级</option>
             {l2Options.map((n) => (
               <option key={n.id} value={n.id}>{n.name}</option>
@@ -207,28 +207,28 @@ export default function PackagesPage() {
           </Select>
         )}
         {filters.l2 && (
-          <Select className="w-32" value={filters.l3} onChange={(e) => applyFilters((f) => ({ ...f, l3: e.target.value }))}>
+          <Select className="w-full sm:w-32" value={filters.l3} onChange={(e) => applyFilters((f) => ({ ...f, l3: e.target.value }))}>
             <option value="">全部三级</option>
             {l3Options.map((n) => (
               <option key={n.id} value={n.id}>{n.name}</option>
             ))}
           </Select>
         )}
-        <Select className="w-28" value={filters.format} onChange={(e) => applyFilters((f) => ({ ...f, format: e.target.value }))}>
+        <Select className="w-full sm:w-28" value={filters.format} onChange={(e) => applyFilters((f) => ({ ...f, format: e.target.value }))}>
           {FORMATS.map((f) => (
             <option key={f} value={f}>{f ? `${FORMAT_ICONS[f] ?? ""} ${f.toUpperCase()}` : "全部格式"}</option>
           ))}
         </Select>
-        <Select className="w-24" value={filters.status} onChange={(e) => applyFilters((f) => ({ ...f, status: e.target.value }))}>
+        <Select className="w-full sm:w-24" value={filters.status} onChange={(e) => applyFilters((f) => ({ ...f, status: e.target.value }))}>
           {STATUSES.map((s) => (
             <option key={s} value={s}>{s || "全部状态"}</option>
           ))}
         </Select>
-        <Select className="w-28" value={filters.undated} onChange={(e) => applyFilters((f) => ({ ...f, undated: e.target.value }))}>
+        <Select className="w-full sm:w-28" value={filters.undated} onChange={(e) => applyFilters((f) => ({ ...f, undated: e.target.value }))}>
           <option value="">全部时间</option>
           <option value="1">未注明时间</option>
         </Select>
-        <Select className="w-28" value={filters.sort} onChange={(e) => applyFilters((f) => ({ ...f, sort: e.target.value }))}>
+        <Select className="w-full sm:w-28" value={filters.sort} onChange={(e) => applyFilters((f) => ({ ...f, sort: e.target.value }))}>
           {Object.entries(SORTS).map(([v, label]) => (
             <option key={v} value={v}>{label}</option>
           ))}
@@ -240,8 +240,8 @@ export default function PackagesPage() {
       ) : !data || data.items.length === 0 ? (
         <Empty icon="📦" title="还没有资料包" hint="到「入库」页上传文件，多个文件可以合并成一个包" />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-stone-200 bg-white">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b border-stone-200 bg-stone-50 text-left text-xs text-stone-500">
                 <th className="w-14 px-4 py-3">封面</th>

@@ -5,7 +5,7 @@
   进出只由视口边缘决定——不闪现、不消失、不挪窝；
 - 点左侧架签选段跳转（滚动定位）；书脊大小变化重建长卷；
 - 楼层纵向窗口化 + 横向按视口裁剪；空档窄条悬停示年跨。 */
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { api, type ShelfPackage, type ShelfSegment } from "@zzlibrary/shared/client";
 import {
   SERIF,
@@ -276,19 +276,32 @@ export function TimelineView({
   // 书脊 hover 预览卡（250ms 延迟，避免扫过时闪烁）
   // 位置跟手用 ref 直改 DOM（mousemove 每秒 60+ 次，进 React state 会整视图重渲染）；
   // 只有「换了哪本书」才 setState。
+  // 悬停只服务真鼠标（hover:hover 细指针）——触屏 tap 会派发合成鼠标事件：
+  // 卡片左上角闪现（挂载竞态）→ 合成 mouseleave 立即清卡 → 卡片盖在手指下抢走 click（详情打不开）。
+  // 触屏上点书脊直接走 onClick 开详情，不经过预览卡。
+  const canHover =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(hover: hover) and (pointer: fine)").matches === true;
   const [hoverPkg, setHoverPkg] = useState<ShelfPackage | null>(null);
   const hoverTimer = useRef<number | null>(null);
   const hoverCardRef = useRef<HTMLDivElement | null>(null);
+  const lastPointer = useRef({ x: 0, y: 0 });
   const positionHoverCard = (x: number, y: number) => {
     const el = hoverCardRef.current;
     if (el === null) return;
     el.style.left = `${Math.min(x + 14, window.innerWidth - 240)}px`;
     el.style.top = `${Math.max(8, y - 16)}px`;
   };
+  // 挂载首帧先定位再上屏——修「先渲染在 (0,0) 再被 move 定位」的左上角闪现竞态
+  useLayoutEffect(() => {
+    if (hoverPkg !== null) positionHoverCard(lastPointer.current.x, lastPointer.current.y);
+  }, [hoverPkg]);
   const hoverHandlers = useMemo<SpineHoverHandlers>(
     () => ({
       onEnter: (pkg, e) => {
+        if (!canHover) return;
         if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+        lastPointer.current = { x: e.clientX, y: e.clientY };
         const x = e.clientX;
         const y = e.clientY;
         hoverTimer.current = window.setTimeout(() => {
@@ -297,6 +310,8 @@ export function TimelineView({
         }, 250);
       },
       onMove: (pkg, e) => {
+        if (!canHover) return;
+        lastPointer.current = { x: e.clientX, y: e.clientY };
         positionHoverCard(e.clientX, e.clientY);
         if (hoverPkg?.id !== pkg.id) setHoverPkg(pkg); // 换书才进 state
       },
@@ -305,7 +320,7 @@ export function TimelineView({
         setHoverPkg(null);
       },
     }),
-    [hoverPkg],
+    [hoverPkg, canHover],
   );
 
   // 视口状态：纵向窗口化（外层 scrollTop/clientHeight）+ 横向裁剪（内层 scrollLeft/clientWidth）
@@ -417,11 +432,11 @@ export function TimelineView({
         </span>
         <span className="rounded-full bg-[#e5d9b8] px-2 py-0.5 text-xs text-[#6b5426]">{rack.total} 包</span>
         {effRange && axisData && (
-          <span className="hidden text-[11px] text-stone-400 md:inline">
+          <span className="hidden text-[11px] text-stone-400 md:inline zz-hide-short">
             {`视口 ${yearLabel(yearOf(viewT1))} – ${yearLabel(yearOf(viewT0))}（全范围 ${yearLabel(yearOf(fullT0))} – ${yearLabel(yearOf(fullT1))}）`}
           </span>
         )}
-        {/* 轴模式切换：发布时间（各层独立分段）/ 入库时间（共用日历分段） */}
+        {/* 轴模式切换：发布时间（各层独立分段）/ 入库时间（共用日历分段）——核心功能，全尺寸保留 */}
         <div className="ml-3 flex overflow-hidden rounded border border-[#c9b58c] text-[11px] leading-none">
           {(
             [
@@ -460,8 +475,9 @@ export function TimelineView({
         </div>
       </div>
 
-      {/* 顶部：操作提示（放滚动区外——界面说明不随横滚滑动、不作为拖拽起点） */}
-      <div className="px-5 pb-1 text-[11px] leading-4 text-stone-400">
+      {/* 顶部：操作提示（放滚动区外——界面说明不随横滚滑动、不作为拖拽起点）；
+          手机/矮视口隐藏（提示是鼠标语义，触屏不适用且挤占书脊高度） */}
+      <div className="hidden px-5 pb-1 text-[11px] leading-4 text-stone-400 md:block zz-hide-short">
         拖拽=平移长卷 · 滚轮=上下浏览 · 悬停书脊=预览 · 点击书脊=详情 · 点架签=选段跳转
       </div>
       {/* 时间轴主体（M3.17 立柱出卷）：外层纵向滚动；内部两列——立柱（不随横向滚动）+ 长卷（内层横向滚动）。
@@ -691,8 +707,8 @@ export function TimelineView({
         </div>
       </div>
 
-      {/* 底部：读图要领（随轴模式变化）——放滚动区外（放长卷列里会跟 canvasW 变窄折行） */}
-      <div className="px-5 pb-2 pt-1 text-[11px] leading-4 text-stone-400">
+      {/* 底部：读图要领（随轴模式变化）——放滚动区外（放长卷列里会跟 canvasW 变窄折行）；手机/矮视口隐藏让位书脊 */}
+      <div className="hidden px-5 pb-2 pt-1 text-[11px] leading-4 text-stone-400 md:block zz-hide-short">
         {axis === "publish"
           ? "弹性时间轴：书多的年代长、书少的年代短；跨层同列≈同一时代 · 空档=该时代无产出或未收录（悬停示年跨） · 未注明时间不上轴（资料包页可补全）"
           : "入库时间轴：所有层共用日历分段，同月同列"}

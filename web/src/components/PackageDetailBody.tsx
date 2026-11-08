@@ -43,7 +43,7 @@ export default function PackageDetailBody({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-[160px_1fr] gap-5">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-[160px_1fr]">
         <div>
           <img src={api.packageCoverUrl(detail.id)} alt="" className="h-52 w-40 rounded-lg object-cover shadow" />
         </div>

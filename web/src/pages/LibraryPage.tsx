@@ -94,8 +94,13 @@ export default function LibraryPage() {
 
   return (
     <div className="absolute inset-0 flex flex-col">
-      {/* 顶部栏 */}
-      <div className="flex items-center justify-between border-b border-stone-200 bg-white/70 px-4 py-2.5 backdrop-blur">
+      {/* 顶部栏：矮视口（横屏手机）且处于时间轴详情态时隐藏——工具栏已有「返回侧视」，整行让位书脊 */}
+      <div
+        className={
+          "flex items-center justify-between border-b border-stone-200 bg-white/70 px-4 py-2.5 backdrop-blur" +
+          (selectedRack !== null ? " zz-hide-short" : "")
+        }
+      >
         <div className="flex items-center gap-2">
           <select
             className="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm"
@@ -167,7 +172,7 @@ function PackageDrawer({
   onRead: (f: FileDetail) => void;
 }) {
   return (
-    <div className="absolute inset-y-0 right-0 z-30 flex w-96 flex-col overflow-y-auto border-l border-stone-200 bg-white/95 shadow-2xl backdrop-blur">
+    <div className="absolute inset-y-0 right-0 z-30 flex w-full flex-col overflow-y-auto border-l border-stone-200 bg-white/95 shadow-2xl backdrop-blur sm:w-96">
       <div className="sticky top-0 flex items-center justify-between border-b border-stone-200 bg-white px-4 py-3">
         <h3 className="truncate text-sm font-semibold text-stone-800">包详情</h3>
         <button className="rounded p-1 text-stone-400 hover:bg-stone-100" onClick={onClose}>
