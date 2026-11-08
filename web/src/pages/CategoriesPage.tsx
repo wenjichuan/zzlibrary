@@ -84,42 +84,42 @@ export default function CategoriesPage() {
           ? l1.map((p) => ({ id: p.id, name: p.name }))
           : l2.map((p) => ({ id: p.id, name: p.name }));
 
+    // 缩进：移动端小步长（40px 封顶），桌面维持原 28px 步长
+    const indentCls = ["pl-2", "pl-6 sm:pl-9", "pl-10 sm:pl-16"][depth] ?? "pl-10 sm:pl-16";
     return (
       <div key={node.id} className="zz-fade-in">
-        <div
-          className="group flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-white"
-          style={{ paddingLeft: depth * 28 + 8 }}
-        >
-          <span className="text-xs text-stone-400">{'一二三'[node.level - 1]}级</span>
+        <div className={`group flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg py-2 pr-2 hover:bg-white ${indentCls}`}>
+          <span className="shrink-0 text-xs text-stone-400">{'一二三'[node.level - 1]}级</span>
           {renaming?.id === node.id ? (
-            <div className="flex flex-1 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <Input
-                className="max-w-xs"
+                className="min-w-0 flex-1 sm:max-w-xs"
                 value={renaming.name}
                 autoFocus
                 onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
                 onKeyDown={(e) => e.key === "Enter" && void rename()}
               />
-              <Button size="sm" onClick={() => void rename()}>保存</Button>
-              <Button size="sm" variant="ghost" onClick={() => setRenaming(null)}>取消</Button>
+              <Button size="sm" className="shrink-0" onClick={() => void rename()}>保存</Button>
+              <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setRenaming(null)}>取消</Button>
             </div>
           ) : (
-            <span className="flex-1 truncate text-sm font-medium text-stone-800">{node.name}</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-800">{node.name}</span>
           )}
           {renaming?.id !== node.id && (
-            <div className="flex items-center gap-1 text-xs">
+            /* 窄屏 w-full：操作组整体换行到名称下方（组内再 flex-wrap），控件全部 nowrap 防中文竖折 */
+            <div className="flex w-full flex-wrap items-center gap-1 text-xs sm:ml-auto sm:w-auto">
               {node.level < 3 && (
-                <button className="rounded px-1.5 py-1 text-stone-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => { setCreatingUnder(node.id); setNewName(""); }}>
+                <button className="whitespace-nowrap rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => { setCreatingUnder(node.id); setNewName(""); }}>
                   ＋子分类
                 </button>
               )}
-              <button className="rounded px-1.5 py-1 text-stone-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => setRenaming({ id: node.id, name: node.name })}>
+              <button className="whitespace-nowrap rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => setRenaming({ id: node.id, name: node.name })}>
                 重命名
               </button>
-              <button className="rounded px-1.5 py-1 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, -1)} title="上移">↑</button>
-              <button className="rounded px-1.5 py-1 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, 1)} title="下移">↓</button>
+              <button className="rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, -1)} title="上移">↑</button>
+              <button className="rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, 1)} title="下移">↓</button>
               <select
-                className="rounded border border-stone-200 bg-white px-1 py-1 text-xs text-stone-600"
+                className="shrink-0 rounded border border-stone-200 bg-white px-1.5 py-1.5 text-xs text-stone-600"
                 value=""
                 onChange={(e) => {
                   const v = e.target.value;
@@ -134,7 +134,7 @@ export default function CategoriesPage() {
                   </option>
                 ))}
               </select>
-              <Button variant="danger" size="sm" onClick={() => void remove(node)}>删除</Button>
+              <Button variant="danger" size="sm" className="shrink-0" onClick={() => void remove(node)}>删除</Button>
             </div>
           )}
         </div>

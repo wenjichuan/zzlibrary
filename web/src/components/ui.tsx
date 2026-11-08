@@ -191,7 +191,7 @@ export function Empty({ icon, title, hint }: { icon: string; title: string; hint
 
 export function PageHeader({ title, actions }: { title: string; actions?: React.ReactNode }) {
   return (
-    <div className="mb-5 flex items-center justify-between">
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-y-2">
       <h1 className="text-xl font-semibold text-stone-800">{title}</h1>
       <div className="flex items-center gap-2">{actions}</div>
     </div>
