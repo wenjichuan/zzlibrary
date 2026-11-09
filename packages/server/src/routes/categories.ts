@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env";
 import { randomUUID } from "node:crypto";
 import { getCategory, type CategoryRow } from "../deps";
+import { langOf, levelWord, msg } from "../i18n";
 import { nowSqlite } from "../db";
 
 export const categoriesRouter = new Hono<Env>();
@@ -46,14 +47,14 @@ categoriesRouter.post("/api/categories", async (c) => {
   const db = c.get("db");
   const payload = await c.req.json<{ name?: unknown; parent_id?: number | null }>().catch(() => ({}) as never);
   const name = typeof payload.name === "string" ? payload.name.trim() : "";
-  if (!name || name.length > 200) throw new HTTPException(422, { message: "名称长度需在 1~200" });
+  if (!name || name.length > 200) throw new HTTPException(422, { message: msg(c, "cat.nameLen") });
   const parentId = payload.parent_id ?? null;
   const parent = getCategory(db, parentId);
   if (parentId !== null && parent === null) {
-    throw new HTTPException(422, { message: "上级分类不存在" });
+    throw new HTTPException(422, { message: msg(c, "cat.parentNotFound") });
   }
   const level = parent ? parent.level + 1 : 1;
-  if (level > 3) throw new HTTPException(422, { message: "最多支持三级分类" });
+  if (level > 3) throw new HTTPException(422, { message: msg(c, "cat.maxLevel") });
   const maxOrder = db
     .prepare(
       "SELECT sort_order FROM categories WHERE parent_id IS ? ORDER BY sort_order DESC LIMIT 1",
@@ -70,7 +71,7 @@ categoriesRouter.patch("/api/categories/:cid", async (c) => {
   const db = c.get("db");
   const cid = Number(c.req.param("cid"));
   const node = getCategory(db, cid);
-  if (node === null) throw new HTTPException(404, { message: "分类不存在" });
+  if (node === null) throw new HTTPException(404, { message: msg(c, "cat.notFound") });
   const payload = await c.req
     .json<{ name?: string | null; sort_order?: number | null; parent_id?: number | null }>()
     .catch(() => ({}) as never);
@@ -84,24 +85,24 @@ categoriesRouter.patch("/api/categories/:cid", async (c) => {
   if (payload.parent_id !== undefined && payload.parent_id !== null) {
     const newParent = getCategory(db, payload.parent_id);
     if (payload.parent_id !== null && newParent === null) {
-      throw new HTTPException(422, { message: "目标上级分类不存在" });
+      throw new HTTPException(422, { message: msg(c, "cat.targetNotFound") });
     }
     const hasChildren = db
       .prepare("SELECT id FROM categories WHERE parent_id = ? LIMIT 1")
       .get(node.id);
     if (hasChildren) {
-      throw new HTTPException(422, { message: "该分类包含子分类，不能移动（请先移走子分类）" });
+      throw new HTTPException(422, { message: msg(c, "cat.hasChildrenMove") });
     }
     if (newParent === null) {
-      if (node.level !== 1) throw new HTTPException(422, { message: "只有一级分类可以移到顶层" });
+      if (node.level !== 1) throw new HTTPException(422, { message: msg(c, "cat.onlyL1Top") });
       parentId = null;
     } else {
       if (newParent.level + 1 !== node.level) {
         throw new HTTPException(422, {
-          message: `「${node.name}」是${"一二三"[node.level - 1]}级分类，只能移到同级分类之下`,
+          message: msg(c, "cat.levelMismatch", { name: node.name, level: levelWord(langOf(c), node.level) }),
         });
       }
-      if (newParent.id === node.id) throw new HTTPException(422, { message: "不能把自己作为上级" });
+      if (newParent.id === node.id) throw new HTTPException(422, { message: msg(c, "cat.selfParent") });
       parentId = newParent.id;
     }
   }
@@ -119,9 +120,9 @@ categoriesRouter.delete("/api/categories/:cid", (c) => {
   const db = c.get("db");
   const cid = Number(c.req.param("cid"));
   const node = getCategory(db, cid);
-  if (node === null) throw new HTTPException(404, { message: "分类不存在" });
+  if (node === null) throw new HTTPException(404, { message: msg(c, "cat.notFound") });
   const hasChildren = db.prepare("SELECT id FROM categories WHERE parent_id = ? LIMIT 1").get(cid);
-  if (hasChildren) throw new HTTPException(422, { message: "该分类包含子分类，请先删除子分类" });
+  if (hasChildren) throw new HTTPException(422, { message: msg(c, "cat.hasChildrenDelete") });
   // 引用该分类的包路径由外键级联删除（FK ON DELETE CASCADE + PRAGMA foreign_keys=ON）
   db.prepare("DELETE FROM categories WHERE id = ?").run(cid);
   return c.json({ ok: true });

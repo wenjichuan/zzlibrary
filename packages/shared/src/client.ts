@@ -25,21 +25,23 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  headers.set("Accept-Language", acceptLanguage()); // 界面选择的语言下发给服务端消息协商
   const resp = await fetch(path, {
-    credentials: "include",
-    headers:
-      init?.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : undefined,
     ...init,
+    credentials: "include",
+    headers,
   });
   if (resp.status === 401 && !path.includes("/auth/")) {
     window.dispatchEvent(new CustomEvent("zzlib:unauthorized"));
   }
   if (!resp.ok) {
-    let detail = `请求失败（${resp.status}）`;
+    let detail = fallbackMessage(resp.status);
     try {
       const body = await resp.json();
       if (typeof body?.detail === "string") detail = body.detail;
-      else if (Array.isArray(body?.detail)) detail = body.detail.map((d: any) => d?.msg).filter(Boolean).join("；") || detail;
+      else if (Array.isArray(body?.detail)) detail = body.detail.map((d: any) => d?.msg).filter(Boolean).join("; ") || detail;
     } catch {
       /* ignore */
     }
@@ -47,6 +49,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (resp.status === 204) return undefined as T;
   return resp.json() as Promise<T>;
+}
+
+/** 服务端错误消息的语言协商：读界面持久化的语言偏好（无则空，浏览器同源请求自带 Accept-Language）。 */
+function acceptLanguage(): string {
+  try {
+    return localStorage.getItem("zzlib:lang") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** 响应体不可读（网关 502/连接中断等）时的兜底串：跟随界面语言（存了偏好用偏好，否则按浏览器语言）。 */
+function fallbackMessage(status: number): string {
+  let zh = true;
+  try {
+    const saved = localStorage.getItem("zzlib:lang");
+    zh = saved === "en" ? false : saved === "zh" ? true : (navigator.language ?? "zh").toLowerCase().startsWith("zh");
+  } catch {
+    /* 受限环境保持 zh（与服务端缺省一致） */
+  }
+  return zh ? `请求失败（${status}）` : `Request failed (${status})`;
 }
 
 function qs(params: Record<string, string | number | undefined | null>): string {

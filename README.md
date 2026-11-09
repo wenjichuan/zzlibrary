@@ -8,9 +8,9 @@
 
 zzlibrary is a self-hosted personal library: your documents shelved like real books — classification decides which bookcase, era decides where on the shelf, and every **package** (a "bound volume" holding any number of files in any format) stands as one spine. Browse your collection the way you browse a library, then read in place — EPUB, PDF, TXT, Markdown, HTML, docx, images, audio and video, with per-file reading progress that follows you.
 
-![Shelf view](docs/screenshots/shelf.png)
+![Shelf view](https://wenobug.github.io/zzlibrary/assets/en/shelf.png)
 
-## Why
+## Features
 
 File managers make you *remember where things are*. zzlibrary makes your collection *legible at a glance*:
 
@@ -20,7 +20,7 @@ File managers make you *remember where things are*. zzlibrary makes your collect
 - **Own your safety net** — one-click full-library backup to any local folder (consistent snapshot + all files). Copy the data folder and you've moved the library.
 - **Fast at scale** — FTS5 full-text search, SQL-aggregated shelf overview, lazy-loaded racks. Tested with 100,000 packages.
 
-![Timeline view](docs/screenshots/timeline.png)
+![Timeline view](https://wenobug.github.io/zzlibrary/assets/en/timeline.png)
 
 ## Quick start
 
@@ -36,7 +36,37 @@ docker run -d --name zzlibrary -p 8000:8000 \
 
 Every device on your LAN (phone, tablet) can open the same library at `http://<server-ip>:8000`.
 
-Deployment details, environment variables and **security notes** (change the default password; don't expose directly to the public internet — use Tailscale/WireGuard): see [DEPLOY.md](DEPLOY.md) / [部署指南](README.zh-CN.md#部署).
+## Deployment
+
+### Where the data lives / backup
+
+- Everything sits in one folder: `<unzipped>/data/` (metadata DB `library.db`, original files `files/`, covers & spines `art/`)
+- **Backup = copy the whole data folder**, or use in-app *Settings → Back up the library* to write a consistent snapshot anywhere (external drives included)
+- Docker: everything lands in the mounted `/data` volume — back up that volume
+- Upgrading: stop the server → overwrite `dist-server/` and `web/` from the new unzipped release (leave `data/` untouched) → start again
+
+### Environment variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ZZLIB_DATA_DIR` | `<unzipped>/data` | Data directory (can point to another disk) |
+| `ZZLIB_PORT` / `PORT` | `8000` | Listen port |
+| `ZZLIB_USERNAME` / `ZZLIB_PASSWORD` | `admin` / `zzlibrary` | Login (**change the password**) |
+| `ZZLIB_ROOT` | auto | App root (parent of `dist-server`; rarely needed) |
+| `ZZLIB_WEB_DIST` | auto | Web UI directory (rarely needed) |
+
+### ⚠️ Security notes
+
+- The server is **single-account session auth**, aimed at personal/home LAN use — **do not expose it to the public internet unprotected**
+- **Change the default password immediately** after first start: set `ZZLIB_PASSWORD` (a `pbkdf2$iterations$salt$hash` value is supported)
+- For remote access prefer **Tailscale/WireGuard** (encrypted tunnel, zero public exposure, no filing/registration needed)
+- If you must expose it publicly: HTTPS reverse proxy (Caddy/Nginx) + a strong password + IP allowlist — at your own risk
+
+### FAQ
+
+- **Port already in use**: set `ZZLIB_PORT=8001` or free the port
+- **Phone can't reach it**: same network? Is the port allowed through the firewall? (On Windows, allow it on *Private networks* when prompted)
+- **Forgot the password**: start with `ZZLIB_PASSWORD=<new>` to reset it
 
 ## Roadmap
 

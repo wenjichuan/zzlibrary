@@ -2,7 +2,8 @@ import type { ShelvesPayload } from "@zzlibrary/core";
 
 /** 与后端 schemas.py 对齐的类型定义（资料包模型）。 */
 
-export type BookStatus = "未读" | "在读" | "已读";
+/** 包状态（语言无关键；显示层翻译：unread=未读/Unread, reading=在读/Reading, done=已读/Done）。 */
+export type BookStatus = "unread" | "reading" | "done";
 export type SegmentMode = "year" | "n_years" | "decade" | "month" | "custom";
 
 export interface CategoryRef {

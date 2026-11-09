@@ -3,8 +3,10 @@ import { api, type CategoryNode } from "@zzlibrary/shared/client";
 import { Button, Input, Modal, PageHeader, Spinner } from "../components/ui";
 import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
+import { useT } from "../i18n/lang";
 
 export default function CategoriesPage() {
+  const t = useT();
   const tree = useCategories((s) => s.tree);
   const loaded = useCategories((s) => s.loaded);
   const load = useCategories((s) => s.load);
@@ -25,12 +27,12 @@ export default function CategoriesPage() {
     if (!newName.trim()) return;
     try {
       const node = await api.createCategory(newName.trim(), creatingUnder ?? null);
-      push("success", "已创建");
+      push("success", t("cat.created"));
       setCreatingUnder(undefined);
       setNewName("");
       addChild(creatingUnder ?? null, node); // 就地插入，不整树重拉
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "创建失败");
+      push("error", err instanceof Error ? err.message : t("cat.createFail"));
     }
   };
 
@@ -38,22 +40,22 @@ export default function CategoriesPage() {
     if (!renaming || !renaming.name.trim()) return;
     try {
       const node = await api.updateCategory(renaming.id, { name: renaming.name.trim() });
-      push("success", "已重命名");
+      push("success", t("cat.renamed"));
       setRenaming(null);
       applyNode(node);
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "重命名失败");
+      push("error", err instanceof Error ? err.message : t("cat.renameFail"));
     }
   };
 
   const remove = async (node: CategoryNode) => {
-    if (!window.confirm(`确定删除分类「${node.name}」？引用它的图书会变为未设置该级分类。`)) return;
+    if (!window.confirm(t("cat.deleteConfirm", { name: node.name }))) return;
     try {
       await api.deleteCategory(node.id);
-      push("success", "已删除");
+      push("success", t("cat.deleted"));
       removeNode(node.id);
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "删除失败");
+      push("error", err instanceof Error ? err.message : t("common.deleteFail"));
     }
   };
 
@@ -62,24 +64,24 @@ export default function CategoriesPage() {
       const updated = await api.updateCategory(node.id, { sort_order: node.sort_order + direction * 1.5 });
       applyNode(updated);
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "移动失败");
+      push("error", err instanceof Error ? err.message : t("cat.moveFail"));
     }
   };
 
   const moveTo = async (node: CategoryNode, parentId: number | null) => {
     try {
       const updated = await api.updateCategory(node.id, { parent_id: parentId });
-      push("success", "已移动");
+      push("success", t("cat.moved"));
       applyNode(updated);
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "移动失败");
+      push("error", err instanceof Error ? err.message : t("cat.moveFail"));
     }
   };
 
   const renderNode = (node: CategoryNode, depth: number) => {
     const sameLevelParents =
       node.level === 1
-        ? [{ id: null, name: "（顶层）" } as const]
+        ? [{ id: null, name: "" } as const]
         : node.level === 2
           ? l1.map((p) => ({ id: p.id, name: p.name }))
           : l2.map((p) => ({ id: p.id, name: p.name }));
@@ -89,7 +91,7 @@ export default function CategoriesPage() {
     return (
       <div key={node.id} className="zz-fade-in">
         <div className={`group flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg py-2 pr-2 hover:bg-white ${indentCls}`}>
-          <span className="shrink-0 text-xs text-stone-400">{'一二三'[node.level - 1]}级</span>
+          <span className="shrink-0 text-xs text-stone-400">{t("cat.level", { n: node.level })}</span>
           {renaming?.id === node.id ? (
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <Input
@@ -99,8 +101,8 @@ export default function CategoriesPage() {
                 onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
                 onKeyDown={(e) => e.key === "Enter" && void rename()}
               />
-              <Button size="sm" className="shrink-0" onClick={() => void rename()}>保存</Button>
-              <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setRenaming(null)}>取消</Button>
+              <Button size="sm" className="shrink-0" onClick={() => void rename()}>{t("common.save")}</Button>
+              <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setRenaming(null)}>{t("common.cancel")}</Button>
             </div>
           ) : (
             <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-800">{node.name}</span>
@@ -110,14 +112,14 @@ export default function CategoriesPage() {
             <div className="flex w-full flex-wrap items-center gap-1 text-xs sm:ml-auto sm:w-auto">
               {node.level < 3 && (
                 <button className="whitespace-nowrap rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => { setCreatingUnder(node.id); setNewName(""); }}>
-                  ＋子分类
+                  {t("cat.sub")}
                 </button>
               )}
               <button className="whitespace-nowrap rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => setRenaming({ id: node.id, name: node.name })}>
-                重命名
+                {t("edit.rename")}
               </button>
-              <button className="rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, -1)} title="上移">↑</button>
-              <button className="rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, 1)} title="下移">↓</button>
+              <button className="rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, -1)} title={t("cat.up")}>↑</button>
+              <button className="rounded px-2 py-1.5 text-stone-500 hover:bg-amber-50" onClick={() => void move(node, 1)} title={t("cat.down")}>↓</button>
               <select
                 className="shrink-0 rounded border border-stone-200 bg-white px-1.5 py-1.5 text-xs text-stone-600"
                 value=""
@@ -127,14 +129,14 @@ export default function CategoriesPage() {
                   void moveTo(node, v === "top" ? null : Number(v));
                 }}
               >
-                <option value="">移动到…</option>
+                <option value="">{t("cat.moveTo")}</option>
                 {sameLevelParents.map((p) => (
                   <option key={p.id ?? "top"} value={p.id ?? "top"}>
-                    {p.name}
+                    {p.id === null ? t("cat.top") : p.name}
                   </option>
                 ))}
               </select>
-              <Button variant="danger" size="sm" className="shrink-0" onClick={() => void remove(node)}>删除</Button>
+              <Button variant="danger" size="sm" className="shrink-0" onClick={() => void remove(node)}>{t("common.delete")}</Button>
             </div>
           )}
         </div>
@@ -146,9 +148,9 @@ export default function CategoriesPage() {
   return (
     <div className="mx-auto max-w-4xl px-6 py-6">
       <PageHeader
-        title="分类管理"
+        title={t("cat.title")}
         actions={
-          <Button onClick={() => { setCreatingUnder(null); setNewName(""); }}>＋ 新建一级分类</Button>
+          <Button onClick={() => { setCreatingUnder(null); setNewName(""); }}>{t("cat.newL1")}</Button>
         }
       />
 
@@ -157,7 +159,7 @@ export default function CategoriesPage() {
           <Spinner />
         ) : tree.length === 0 ? (
           <div className="py-12 text-center text-sm text-stone-500">
-            还没有分类。先建一个一级分类（如「技术」「文学」），图书入库时就可以选择了。
+            {t("cat.empty")}
           </div>
         ) : (
           tree.map((n) => renderNode(n, 0))
@@ -166,19 +168,19 @@ export default function CategoriesPage() {
 
       {creatingUnder !== undefined && (
         <Modal
-          title={creatingUnder === null ? "新建一级分类" : `在「${tree.flatMap(findName(creatingUnder)).join("")}」下新建子分类`}
+          title={creatingUnder === null ? t("cat.newTitle") : t("cat.newSubTitle", { name: tree.flatMap(findName(creatingUnder)).join("") })}
           onClose={() => setCreatingUnder(undefined)}
         >
           <Input
             autoFocus
-            placeholder="分类名称"
+            placeholder={t("cat.namePh")}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void create()}
           />
           <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setCreatingUnder(undefined)}>取消</Button>
-            <Button onClick={() => void create()} disabled={!newName.trim()}>创建</Button>
+            <Button variant="ghost" onClick={() => setCreatingUnder(undefined)}>{t("common.cancel")}</Button>
+            <Button onClick={() => void create()} disabled={!newName.trim()}>{t("cat.create")}</Button>
           </div>
         </Modal>
       )}

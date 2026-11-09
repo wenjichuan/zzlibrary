@@ -3,7 +3,9 @@
  * 轴系：X=时间、Y=二级分类、Z=三级分类；数量由书脊直接体现。
  * 日期域函数（公元前显示/逆解析）全部转发 core——本文件只保留视图模型与排序。 */
 import { displayToUtc, prettyDisplayDate, restOfDisplay, yearLabelOf, yearOfDisplay } from "@zzlibrary/core";
+import { displayI18nNow } from "../i18n/lang";
 import type { ShelfPackage, ShelfSegment, ShelvesDetail } from "@zzlibrary/shared/client";
+import { sortLocale, t } from "../i18n/lang";
 
 /* ---------- 视图模型 ---------- */
 
@@ -47,13 +49,13 @@ export function buildRackVMs(data: ShelvesDetail): RackVM[] {
         (pl.package.publish_date == null ? undated : dated).push(pl.package);
       }
       dated.sort(cmpByDate);
-      undated.sort((a, b) => a.title.localeCompare(b.title, "zh"));
+      undated.sort((a, b) => a.title.localeCompare(b.title, sortLocale()));
       const ingest = [...dated, ...undated]; // 已按包 id 去重
       ingest.sort(
-        (a, b) => a.created_at.localeCompare(b.created_at) || a.title.localeCompare(b.title, "zh"),
+        (a, b) => a.created_at.localeCompare(b.created_at) || a.title.localeCompare(b.title, sortLocale()),
       );
       return {
-        label: shelf.l3?.name ?? "未细分",
+        label: shelf.l3?.name ?? t("lib.unsplit"),
         l3Id: shelf.l3?.id ?? null,
         total: shelf.total,
         segments: shelf.segments ?? [],
@@ -73,7 +75,7 @@ export function buildRackVMs(data: ShelvesDetail): RackVM[] {
       : null;
     return {
       key: `g${g.l2?.id ?? "none"}-${gi}`,
-      label: g.l2?.name ?? "未分类",
+      label: g.l2?.name ?? t("common.uncategorized"),
       total: g.total,
       range: g.range ?? null,
       ingestRange,
@@ -90,6 +92,14 @@ export function l2KeyOfRack(rackKey: string): string {
 
 /* ---------- 日期/展示纯函数 ---------- */
 
+/** 包状态键 → 显示词（DB/API 存语言无关键，显示层经字典翻译）。未知值原样透出。 */
+export function statusLabel(s: string): string {
+  if (s === "unread") return t("status.unread");
+  if (s === "reading") return t("status.reading");
+  if (s === "done") return t("status.done");
+  return s;
+}
+
 export const SERIF = `"Noto Serif SC", "Songti SC", SimSun, serif`;
 
 export function placeholderColor(id: number): string {
@@ -100,7 +110,7 @@ export function placeholderColor(id: number): string {
 /** 显示日期 → 年整数（负 = 公元前）。转发 core（域规则唯一出处）。 */
 export const yearNum = yearOfDisplay;
 
-export const yearLabel = yearLabelOf;
+export const yearLabel = (y: number) => yearLabelOf(y, displayI18nNow());
 
 /** 同年内取 "MM-DD" 部分（负年多一位符号）。转发 core。 */
 const restOf = restOfDisplay;
@@ -109,14 +119,14 @@ const restOf = restOfDisplay;
 function cmpByDate(a: ShelfPackage, b: ShelfPackage): number {
   const da = a.publish_date;
   const db = b.publish_date;
-  if (!da || !db) return da === db ? a.title.localeCompare(b.title, "zh") : da ? -1 : 1;
+  if (!da || !db) return da === db ? a.title.localeCompare(b.title, sortLocale()) : da ? -1 : 1;
   const ya = yearNum(da);
   const yb = yearNum(db);
   if (ya !== yb) return ya - yb;
   const ra = restOf(da);
   const rb = restOf(db);
   if (ra !== rb) return ra < rb ? -1 : 1;
-  return a.title.localeCompare(b.title, "zh");
+  return a.title.localeCompare(b.title, sortLocale());
 }
 
 /** 显示日期 → UTC 毫秒。转发 core。 */
@@ -125,4 +135,4 @@ export const toUtc = displayToUtc;
 export const yearOf = (ms: number) => new Date(ms).getUTCFullYear();
 
 /** 展示用日期。转发 core。 */
-export const prettyDate = prettyDisplayDate;
+export const prettyDate = (d: string | null) => prettyDisplayDate(d, displayI18nNow());

@@ -1,4 +1,5 @@
 import { flatten, useCategories } from "../stores/categories";
+import { useT } from "../i18n/lang";
 import { Select } from "./ui";
 
 export interface CategoryValue {
@@ -15,6 +16,7 @@ export default function CategoryCascade({
   value: CategoryValue;
   onChange: (v: CategoryValue) => void;
 }) {
+  const t = useT();
   const tree = useCategories((s) => s.tree);
   const { l1, l2 } = flatten(tree);
 
@@ -32,7 +34,7 @@ export default function CategoryCascade({
           onChange({ l1_id: v, l2_id: null, l3_id: null });
         }}
       >
-        <option value="">不设置</option>
+        <option value="">{t("cls.unset")}</option>
         {l1.map((n) => (
           <option key={n.id} value={n.id}>
             {n.name}
@@ -47,7 +49,7 @@ export default function CategoryCascade({
           onChange({ ...value, l2_id: v, l3_id: null });
         }}
       >
-        <option value="">{value.l1_id ? "不设置" : "先选一级"}</option>
+        <option value="">{value.l1_id ? t("cls.unset") : t("cls.pickL1")}</option>
         {l2Options.map((n) => (
           <option key={n.id} value={n.id}>
             {n.name}
@@ -62,7 +64,7 @@ export default function CategoryCascade({
           onChange({ ...value, l3_id: v });
         }}
       >
-        <option value="">{value.l2_id ? "不设置" : "先选二级"}</option>
+        <option value="">{value.l2_id ? t("cls.unset") : t("cls.pickL2")}</option>
         {l3Options.map((n) => (
           <option key={n.id} value={n.id}>
             {n.name}

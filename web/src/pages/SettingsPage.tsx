@@ -5,8 +5,10 @@ import { api, formatBytes } from "@zzlibrary/shared/client";
 import type { BackupReport } from "@zzlibrary/shared/client";
 import { Button, Input, PageHeader } from "../components/ui";
 import { useToast } from "../stores/toast";
+import { useT } from "../i18n/lang";
 
 export default function SettingsPage() {
+  const t = useT();
   const { push } = useToast();
   const [dest, setDest] = useState("");
   const [backing, setBacking] = useState(false);
@@ -14,16 +16,16 @@ export default function SettingsPage() {
 
   const backupNow = async () => {
     if (!dest.trim()) {
-      push("error", "请先填写备份目标目录");
+      push("error", t("settings.destRequired"));
       return;
     }
     setBacking(true);
     try {
       const r = await api.backupLibrary(dest.trim());
       setLastReport(r);
-      push("success", `备份完成：${r.files} 个文件 · ${formatBytes(r.bytes)} → ${r.dest}`);
+      push("success", t("settings.backupDone", { n: r.files, size: formatBytes(r.bytes), dest: r.dest }));
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "备份失败");
+      push("error", err instanceof Error ? err.message : t("settings.backupFail"));
     } finally {
       setBacking(false);
     }
@@ -32,30 +34,29 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-5 px-6 py-6">
       <div>
-        <PageHeader title="设置 · 维护与备份" />
+        <PageHeader title={t("settings.title")} />
         <p className="-mt-3 text-sm text-stone-500">
-          资料全部保存在本机。定期「备份整库」到其他磁盘或移动硬盘，防丢设备丢资料；
-          跨设备云同步将在后续版本提供。
+          {t("settings.intro")}
         </p>
       </div>
 
       <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 text-sm">
-        <div className="font-semibold text-stone-700">备份整库</div>
+        <div className="font-semibold text-stone-700">{t("settings.backupTitle")}</div>
         <label className="block space-y-1">
-          <span className="text-xs text-stone-500">备份目标目录（本机路径，如移动硬盘）</span>
+          <span className="text-xs text-stone-500">{t("settings.destLabel")}</span>
           <Input value={dest} onChange={(e) => setDest(e.target.value)} placeholder="D:\zzlibrary-backup" />
         </label>
         <div className="flex items-center justify-between gap-3">
           <span className="text-stone-500">
-            数据库一致性快照 + 全部文件与封面；重复备份同一目录会覆盖旧快照
+            {t("settings.backupHint")}
           </span>
           <Button size="sm" onClick={() => void backupNow()} disabled={backing}>
-            {backing ? "备份中…" : "开始备份"}
+            {backing ? t("settings.backing") : t("settings.start")}
           </Button>
         </div>
         {lastReport !== null && (
           <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-500">
-            上次备份：{lastReport.files} 个文件 · {formatBytes(lastReport.bytes)} → {lastReport.dest}
+            {t("settings.lastBackup", { n: lastReport.files, size: formatBytes(lastReport.bytes), dest: lastReport.dest })}
           </div>
         )}
       </section>

@@ -6,6 +6,7 @@ import { parseRange } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { getCategory } from "../deps";
 import { nowSqlite } from "../db";
+import { langOf, msg, msgFor, type Lang } from "../i18n";
 
 export const segmentConfigRouter = new Hono<Env>();
 
@@ -37,28 +38,28 @@ function safeParams(text: string): Record<string, unknown> {
   }
 }
 
-function validate(payload: { mode?: string; params?: Record<string, unknown> }): void {
+function validate(payload: { mode?: string; params?: Record<string, unknown> }, lang: Lang): void {
   const mode = payload.mode ?? "";
   const params = payload.params ?? {};
   if (mode === "n_years") {
     const n = params.n;
     if (typeof n !== "number" || !Number.isInteger(n) || !(1 <= n && n <= 100)) {
-      throw new HTTPException(422, { message: "n_years 模式需要在 params.n 提供 1~100 的整数" });
+      throw new HTTPException(422, { message: msgFor(lang, "seg.nYearsParam") });
     }
   } else if (mode === "custom") {
     const ranges = params.ranges;
     if (!Array.isArray(ranges) || ranges.length === 0) {
-      throw new HTTPException(422, { message: "custom 模式需要在 params.ranges 提供至少一个区间" });
+      throw new HTTPException(422, { message: msgFor(lang, "seg.rangesMissing") });
     }
     for (const r of ranges) {
       if (typeof r !== "object" || r === null || parseRange(r) === null) {
         throw new HTTPException(422, {
-          message: `区间格式无效：${JSON.stringify(r)}（需要 start/end，支持 YYYY / YYYY-MM / YYYY-MM-DD；alias 可选）`,
+          message: msgFor(lang, "seg.rangeInvalid", { raw: JSON.stringify(r) }),
         });
       }
     }
   } else if (!["year", "decade", "month"].includes(mode)) {
-    throw new HTTPException(422, { message: "分段方式无效" });
+    throw new HTTPException(422, { message: msgFor(lang, "seg.modeInvalid") });
   }
 }
 
@@ -110,7 +111,7 @@ segmentConfigRouter.put("/api/segment-config", async (c) => {
   const payload = await c.req
     .json<{ mode?: string; params?: Record<string, unknown> }>()
     .catch(() => ({}) as never);
-  validate(payload);
+  validate(payload, langOf(c));
   const result = out(upsert(c.get("db"), "global", null, null, payload as { mode: string; params: Record<string, unknown> }));
   return c.json(result);
 });
@@ -119,11 +120,11 @@ segmentConfigRouter.put("/api/segment-config/:l2Id", async (c) => {
   const db = c.get("db");
   const l2Id = Number(c.req.param("l2Id"));
   const l2 = getCategory(db, l2Id);
-  if (l2 === null || l2.level !== 2) throw new HTTPException(404, { message: "二级分类不存在" });
+  if (l2 === null || l2.level !== 2) throw new HTTPException(404, { message: msg(c, "seg.l2NotFound") });
   const payload = await c.req
     .json<{ mode?: string; params?: Record<string, unknown> }>()
     .catch(() => ({}) as never);
-  validate(payload);
+  validate(payload, langOf(c));
   const result = out(upsert(db, "l2", l2Id, null, payload as { mode: string; params: Record<string, unknown> }));
   return c.json(result);
 });
@@ -134,7 +135,7 @@ segmentConfigRouter.delete("/api/segment-config/:l2Id", (c) => {
   const cfg = db
     .prepare("SELECT * FROM segment_configs WHERE scope = 'l2' AND l2_id = ?")
     .get(l2Id) as ConfigRow | undefined;
-  if (cfg === undefined) throw new HTTPException(404, { message: "该二级分类没有覆盖配置" });
+  if (cfg === undefined) throw new HTTPException(404, { message: msg(c, "seg.noL2Override") });
   db.prepare("DELETE FROM segment_configs WHERE id = ?").run(cfg.id);
   return c.json({ ok: true });
 });
@@ -144,12 +145,12 @@ segmentConfigRouter.put("/api/segment-config/l3/:l3Id", async (c) => {
   const l3Id = Number(c.req.param("l3Id"));
   const l3 = getCategory(db, l3Id);
   if (l3 === null || l3.level !== 3 || l3.parent_id === null) {
-    throw new HTTPException(404, { message: "三级分类不存在" });
+    throw new HTTPException(404, { message: msg(c, "seg.l3NotFound") });
   }
   const payload = await c.req
     .json<{ mode?: string; params?: Record<string, unknown> }>()
     .catch(() => ({}) as never);
-  validate(payload);
+  validate(payload, langOf(c));
   const result = out(upsert(db, "l3", l3.parent_id, l3Id, payload as { mode: string; params: Record<string, unknown> }));
   return c.json(result);
 });
@@ -160,7 +161,7 @@ segmentConfigRouter.delete("/api/segment-config/l3/:l3Id", (c) => {
   const cfg = db
     .prepare("SELECT * FROM segment_configs WHERE scope = 'l3' AND l3_id = ?")
     .get(l3Id) as ConfigRow | undefined;
-  if (cfg === undefined) throw new HTTPException(404, { message: "该三级分类没有覆盖配置" });
+  if (cfg === undefined) throw new HTTPException(404, { message: msg(c, "seg.noL3Override") });
   db.prepare("DELETE FROM segment_configs WHERE id = ?").run(cfg.id);
   return c.json({ ok: true });
 });

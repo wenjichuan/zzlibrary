@@ -168,6 +168,12 @@ END;
     db.exec("INSERT INTO packages_fts(packages_fts) VALUES ('rebuild')");
     db.prepare("INSERT OR REPLACE INTO app_state (key, value) VALUES ('fts_v1_rebuilt', '1')").run();
   }
+  // 状态词改语言无关键（i18n 前置）：旧调试库的中文存量值一次性归一（幂等；新库无此数据）
+  db.exec(
+    "UPDATE packages SET status = CASE status" +
+      " WHEN '在读' THEN 'reading' WHEN '已读' THEN 'done' WHEN '未读' THEN 'unread'" +
+      " ELSE status END",
+  );
 }
 
 /** 新实体 uuid 生成。 */

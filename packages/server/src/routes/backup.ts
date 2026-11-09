@@ -5,6 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { Env } from "../env";
+import { msg } from "../i18n";
 
 export const backupRouter = new Hono<Env>();
 
@@ -34,15 +35,15 @@ function copyTree(src: string, dest: string): { files: number; bytes: number } {
 }
 
 backupRouter.post("/api/backup/run", async (c) => {
-  if (running) throw new HTTPException(409, { message: "已有备份正在进行中，请稍候" });
+  if (running) throw new HTTPException(409, { message: msg(c, "backup.inProgress") });
   const settings = c.get("settings");
   const payload = await c.req.json<{ dest?: string }>().catch(() => ({}) as never);
   const dest = (payload?.dest ?? "").trim();
-  if (!dest) throw new HTTPException(422, { message: "请填写备份目标目录" });
+  if (!dest) throw new HTTPException(422, { message: msg(c, "backup.destRequired") });
   const absDest = resolve(dest);
   const absData = resolve(settings.dataDir);
   if (absDest === absData || absDest.startsWith(absData + sep)) {
-    throw new HTTPException(422, { message: "备份目录不能在数据目录内部" });
+    throw new HTTPException(422, { message: msg(c, "backup.nested") });
   }
   running = true;
   try {

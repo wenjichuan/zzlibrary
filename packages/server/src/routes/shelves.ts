@@ -12,9 +12,11 @@ import {
 } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { getCategory, type CategoryRow } from "../deps";
+import { displayI18nOf, langOf, msgFor, type Lang } from "../i18n";
 import type { ShelvesDetail } from "@zzlibrary/shared";
 import { isoFromSqlite } from "../db";
 import type { PackageRow } from "../repo";
+import type { DisplayI18n } from "@zzlibrary/core";
 
 export const shelvesRouter = new Hono<Env>();
 
@@ -33,7 +35,7 @@ shelvesRouter.get("/api/stats", (c) => {
 
 /** 轻载荷书架（侧视/概览/计数共用）：SQL 聚合计数（(包,l2,l3) 三元组去重下推）+ 每层 SQL 日期范围算真实段带网格。
  * 零包体装载零 N+1——大馆藏的默认入口；段带计数为 0（进架 /rack 才取实数）。 */
-function buildLightShelves(db: Env["Variables"]["db"], l1: CategoryRow): ShelvesDetail {
+function buildLightShelves(db: Env["Variables"]["db"], l1: CategoryRow, i18n: DisplayI18n): ShelvesDetail {
   const { groups: grp, total } = l1GroupCounts(db, l1.id);
   const sub = db
     .prepare(
@@ -70,7 +72,7 @@ function buildLightShelves(db: Env["Variables"]["db"], l1: CategoryRow): Shelves
           const { scope, config } = resolveConfigWithScope(configRows, g.l2_id, s.l3?.id ?? null);
           const dates = s.rmin !== null ? [s.rmin] : []; // 只需定范围；computeGrid 取边界
           if (s.rmax !== null && s.rmax !== s.rmin) dates.push(s.rmax);
-          const grid = s.rmin !== null ? computeGrid(dates, config) : [];
+          const grid = s.rmin !== null ? computeGrid(dates, config, i18n) : [];
           return {
             l3: s.l3,
             segments: grid.map((seg) => ({
@@ -101,18 +103,18 @@ function buildLightShelves(db: Env["Variables"]["db"], l1: CategoryRow): Shelves
 
 shelvesRouter.get("/api/shelves/:l1Id/overview", (c) => {
   const db = c.get("db");
-  const l1 = l1Or404(db, Number(c.req.param("l1Id")));
-  return c.json(buildLightShelves(db, l1) satisfies ShelvesDetail);
+  const l1 = l1Or404(db, Number(c.req.param("l1Id")), langOf(c));
+  return c.json(buildLightShelves(db, l1, displayI18nOf(langOf(c))) satisfies ShelvesDetail);
 });
 
 /** 单架详情（正面时间轴入口）：只装载该二级组的包（formats 批量聚合），进架才拉包体。 */
 shelvesRouter.get("/api/shelves/:l1Id/rack", (c) => {
   const db = c.get("db");
-  const l1 = l1Or404(db, Number(c.req.param("l1Id")));
+  const l1 = l1Or404(db, Number(c.req.param("l1Id")), langOf(c));
   const l2Raw = c.req.query("l2") ?? "";
   const l2None = l2Raw === "none";
   const l2Id = l2None ? null : Number(l2Raw);
-  if (!l2None && !Number.isInteger(l2Id)) throw new HTTPException(422, { message: "l2 需为数字 id 或 none" });
+  if (!l2None && !Number.isInteger(l2Id)) throw new HTTPException(422, { message: msgFor(langOf(c), "shelves.l2Param") });
 
   const cond = l2None ? "pp.l1_id = ? AND pp.l2_id IS NULL" : "pp.l1_id = ? AND pp.l2_id = ?";
   const args: Array<number> = l2None ? [l1.id] : [l1.id, l2Id!];
@@ -121,7 +123,7 @@ shelvesRouter.get("/api/shelves/:l1Id/rack", (c) => {
     .all(...args) as RawPkg[];
   const pkgs = attachRackRelations(db, rows);
   const cats = collectCats(db, pkgs);
-  return c.json(buildShelves({ id: l1.id, name: l1.name }, pkgs, cats, loadConfigRows(db), true));
+  return c.json(buildShelves({ id: l1.id, name: l1.name }, pkgs, cats, loadConfigRows(db), true, displayI18nOf(langOf(c))));
 });
 
 /** 批量补挂 formats（只要 format 列）与 paths——单架包集的两条 IN 查询，替代每包 2 条的 N+1。 */
@@ -194,10 +196,10 @@ function collectCats(db: Env["Variables"]["db"], pkgs: AggPackage[]): Map<number
   return cats;
 }
 
-function l1Or404(db: Env["Variables"]["db"], l1Id: number): CategoryRow {
-  const c = getCategory(db, l1Id);
-  if (c === null || c.level !== 1) throw new HTTPException(404, { message: "一级分类不存在" });
-  return c;
+function l1Or404(db: Env["Variables"]["db"], l1Id: number, lang: Lang): CategoryRow {
+  const cat = getCategory(db, l1Id);
+  if (cat === null || cat.level !== 1) throw new HTTPException(404, { message: msgFor(lang, "shelves.l1NotFound") });
+  return cat;
 }
 
 interface RawPkg extends PackageRow {}

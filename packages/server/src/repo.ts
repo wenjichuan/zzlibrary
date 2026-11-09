@@ -88,7 +88,7 @@ export function getPackageFull(db: DatabaseSync, packageId: number): PackageFull
 
 export function getPackageOr404(db: DatabaseSync, packageId: number): PackageFull {
   const pkg = getPackageFull(db, packageId);
-  if (pkg === null) throw new HTTPException(404, { message: "资料包不存在" });
+  if (pkg === null) throw new HTTPException(404, { message: "err.pkgNotFound" }); // 键：onError 按请求语言翻译
   return pkg;
 }
 
@@ -191,9 +191,9 @@ export function recomputeAllPackageStatuses(db: DatabaseSync): number {
   const readable = [...FORMATS.values()].filter((f) => f.readable).map((f) => `'${f.format}'`).join(",");
   const target = `
     CASE WHEN n = 0 THEN ''
-         WHEN m = 2 THEN '在读'
-         WHEN m = 0 THEN '已读'
-         ELSE '未读' END`;
+         WHEN m = 2 THEN 'reading'
+         WHEN m = 0 THEN 'done'
+         ELSE 'unread' END`;
   const result = pstmt(
     db,
     `WITH agg AS (

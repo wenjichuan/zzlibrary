@@ -16,6 +16,41 @@ import {
 import { detectFormat } from "./formats";
 import { computePackageStatus } from "./status";
 import { cleanPackageName, parseLooseDate, stemTitle } from "./ingest";
+import type { DisplayI18n } from "./displayI18n";
+
+/** 英文展示钩子（core 只定义接口与中文默认；en 词属于调用方字典——此处测试内联）。 */
+const EN: DisplayI18n = { bc: (y) => `${y} BC`, undated: "Undated", other: "Other" };
+
+describe("展示 i18n 钩子（默认中文不变，注入 en 生效）", () => {
+  it("formatYear / computeGrid 标签走钩子", () => {
+    expect(formatYear(-221)).toBe("前221"); // 默认中文
+    expect(formatYear(-221, EN)).toBe("221 BC");
+    const grid = computeGrid(["0581-01-01", "0907-01-01", null], { mode: "custom", params: { ranges: [{ start: "581", end: "907", alias: "Sui-Tang" }] } }, EN);
+    expect(grid[0]!.label).toBe("581–907");
+    expect(grid[1]!.label).toBe("Other"); // custom 区间外
+    expect(grid[2]!.label).toBe("Undated"); // 未注明末段
+  });
+
+  it("parsePartialDate 接受 BC 后缀", () => {
+    expect(parsePartialDate("221 BC")).toBe("-9779-01-01");
+    expect(parsePartialDate("221B.C.")).toBe("-9779-01-01");
+  });
+
+  it("DateParseError 携带 code", () => {
+    try {
+      parsePartialDate("0");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe("date.yearZero");
+    }
+    try {
+      parsePartialDate("abc");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe("date.format");
+    }
+  });
+});
 
 describe("dates（公元前 9 补码）", () => {
   it("序键编码", () => {
@@ -149,22 +184,22 @@ describe("computePackageStatus", () => {
   it("聚合规则与不可读中性", () => {
     expect(computePackageStatus([])).toBe("");
     expect(computePackageStatus([{ format: "zip", percent: null }])).toBe(""); // 不可读不参与
-    expect(computePackageStatus([{ format: "pdf", percent: null }])).toBe("未读");
-    expect(computePackageStatus([{ format: "pdf", percent: 10 }])).toBe("在读");
-    expect(computePackageStatus([{ format: "pdf", percent: 98.5 }])).toBe("已读");
+    expect(computePackageStatus([{ format: "pdf", percent: null }])).toBe("unread");
+    expect(computePackageStatus([{ format: "pdf", percent: 10 }])).toBe("reading");
+    expect(computePackageStatus([{ format: "pdf", percent: 98.5 }])).toBe("done");
     expect(
       computePackageStatus([
         { format: "pdf", percent: 99 },
         { format: "epub", percent: 30 },
       ]),
-    ).toBe("在读");
+    ).toBe("reading");
     expect(
       computePackageStatus([
         { format: "pdf", percent: 100 },
         { format: "epub", percent: null },
         { format: "bin", percent: 50 }, // 中性
       ]),
-    ).toBe("未读");
+    ).toBe("unread");
   });
 });
 

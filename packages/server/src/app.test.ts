@@ -69,6 +69,28 @@ describe("认证", () => {
     expect(r.json.detail).toBe("用户名或密码错误");
   });
 
+  it("Accept-Language: en → 英文消息（缺省 zh）", async () => {
+    const en = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json", "accept-language": "en-US,en;q=0.9" },
+      body: JSON.stringify({ username: "admin", password: "wrong" }),
+    });
+    expect(en.status).toBe(401);
+    expect(await en.json()).toMatchObject({ detail: "Wrong username or password" });
+    // 键式深层抛出（repo 的 err.pkgNotFound）也按请求语言翻译
+    const cookie0 = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: "zzlibrary" }),
+    });
+    const sc = cookie0.headers.get("set-cookie")!.split(";")[0];
+    const nf = await app.request("/api/packages/999999", { headers: { cookie: sc, "accept-language": "en" } });
+    expect(nf.status).toBe(404);
+    expect(await nf.json()).toMatchObject({ detail: "Package not found" });
+    const nfZh = await app.request("/api/packages/999999", { headers: { cookie: sc } });
+    expect(((await nfZh.json()) as { detail: string }).detail).toBe("资料包不存在");
+  });
+
   it("登录成功并建立会话", async () => {
     const r = await call("POST", "/api/auth/login", { username: "admin", password: "zzlibrary" });
     expect(r.status).toBe(200);
@@ -113,6 +135,15 @@ describe("入库两步", () => {
     sid1 = r.json.stage_id;
   });
 
+  it("stage 中文文件名按 UTF-8 还原（不乱码）", async () => {
+    const form = new FormData();
+    form.append("file", new Blob(["一行正文\n"]), "测试·文件名.txt");
+    const r = await call("POST", "/api/packages/stage", form);
+    expect(r.status).toBe(200);
+    expect(r.json.filename).toBe("测试·文件名.txt");
+    expect(r.json.meta.title).toBe("一行正文"); // txt 规则：首行做标题
+  });
+
   it("stage md：# 标题抽取", async () => {
     const form = new FormData();
     form.append("file", new Blob(["# 马克笔记标题\n正文"]), "note.md");
@@ -148,7 +179,7 @@ describe("入库两步", () => {
     expect(r.json.tags).toEqual(["测试"]);
     expect(r.json.classifications[0].l2.name).toBe("古代文明");
     expect(r.json.file_count).toBe(2);
-    expect(r.json.status).toBe("未读");
+    expect(r.json.status).toBe("unread");
   });
 
   it("无公元 0 年 → 422", async () => {
@@ -196,10 +227,10 @@ describe("进度与状态机", () => {
     const detail = await call("GET", `/api/packages/${pid}`);
     const fid = detail.json.files[0].id;
     await call("PUT", `/api/progress/${fid}`, { locator: { offset: 10 }, percent: 40 });
-    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("在读");
+    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("reading");
     await call("PUT", `/api/progress/${fid}`, { locator: { offset: 20 }, percent: 100 });
-    // 另一文件未读 → 包整体回「未读」（一已读+一未读 = 未读）
-    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("未读");
+    // 另一文件未读 → 包整体回 unread（一已读+一未读 = 未读）
+    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("unread");
   });
 });
 

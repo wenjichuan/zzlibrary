@@ -18,7 +18,8 @@ import { Readable } from "node:stream";
 import { createHash, randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { detectFormat, displayDate, mediaTypeOf, parsePartialDate, sanitizeName, stemTitle } from "@zzlibrary/core";
+import { detectFormat, displayDate, mediaTypeOf, parsePartialDate, sanitizeName, stemTitle, DateParseError } from "@zzlibrary/core";
+import { langOf, msg, msgFor, type Lang } from "../i18n";
 import type { Env } from "../env";
 import { resolvePaths } from "../deps";
 import { streamMultipart } from "../multipart";
@@ -151,7 +152,7 @@ packagesRouter.post("/api/packages/stage", async (c) => {
   const contentType = c.req.header("content-type") ?? "";
   const rawBody = c.req.raw.body;
   if (rawBody === null || !contentType.includes("multipart/form-data")) {
-    throw new HTTPException(422, { message: "缺少上传内容（multipart）" });
+    throw new HTTPException(422, { message: msg(c, "pkg.multipartMissing") });
   }
   // 流式接收：file 字段直接写盘 + 增量哈希（GB 级文件不整读进内存）；
   // cover（客户端渲染的 PDF 首页，小）与其他小字段缓冲（封顶防滥用）。
@@ -211,7 +212,7 @@ packagesRouter.post("/api/packages/stage", async (c) => {
 
   if (filename === null) {
     rmSync(stagingDir, { recursive: true, force: true });
-    throw new HTTPException(422, { message: "缺少文件名" });
+    throw new HTTPException(422, { message: msg(c, "pkg.filenameMissing") });
   }
   const result = finishStage(settings, stagingDir, target, stageId, filename, size, hash.digest("hex"), coverBytes);
   return c.json({
@@ -248,7 +249,7 @@ packagesRouter.post("/api/packages/stage/discard", async (c) => {
 packagesRouter.get("/api/packages/stage/:stageId/cover", (c) => {
   const settings = c.get("settings");
   const path = join(settings.stagingDir, c.req.param("stageId"), "cover.png");
-  if (!existsSync(path)) throw new HTTPException(404, { message: "该文件没有可预览的封面" });
+  if (!existsSync(path)) throw new HTTPException(404, { message: msg(c, "pkg.noStageCover") });
   return serveFile(c, path, "image/png");
 });
 
@@ -268,12 +269,13 @@ interface CommitPayload {
 packagesRouter.post("/api/packages", async (c) => {
   const db = c.get("db");
   const settings = c.get("settings");
+  const lang = langOf(c);
   const payload = await c.req.json<CommitPayload>().catch(() => ({}) as never);
   const stageIds = payload.stage_ids ?? [];
-  if (stageIds.length === 0) throw new HTTPException(422, { message: "stage_ids 不能为空" });
+  if (stageIds.length === 0) throw new HTTPException(422, { message: msg(c, "pkg.stageIdsEmpty") });
   const meta = payload.meta ?? {};
   const title = (meta.title ?? "").trim();
-  if (!title || title.length > 500) throw new HTTPException(422, { message: "包名长度需在 1~500" });
+  if (!title || title.length > 500) throw new HTTPException(422, { message: msg(c, "pkg.titleLen") });
 
   interface StagedInfo {
     dir: string;
@@ -283,7 +285,7 @@ packagesRouter.post("/api/packages", async (c) => {
   for (const stageId of stageIds) {
     const stagingDir = join(settings.stagingDir, stageId);
     if (!existsSync(join(stagingDir, "file"))) {
-      throw new HTTPException(404, { message: `暂存文件已过期（${stageId.slice(0, 8)}…），请重新上传` });
+      throw new HTTPException(404, { message: msg(c, "pkg.stageExpired", { id: stageId.slice(0, 8) }) });
     }
     staged.push({
       dir: stagingDir,
@@ -291,8 +293,8 @@ packagesRouter.post("/api/packages", async (c) => {
     });
   }
 
-  const resolvedPaths = resolvePaths(db, meta.classifications);
-  const publishDate = parseDateField(meta.publish_date);
+  const resolvedPaths = resolvePaths(db, meta.classifications, lang);
+  const publishDate = parseDateField(meta.publish_date, lang);
 
   const { pkgId, packageCover } = inTransaction(db, () => {
     const ins = db
@@ -306,7 +308,7 @@ packagesRouter.post("/api/packages", async (c) => {
         (meta.publisher ?? "").trim() || null,
         JSON.stringify(cleanList(meta.tags)),
         meta.notes ?? null,
-        "未读",
+        "unread",
         nowSqlite(),
         nowSqlite(),
         randomUUID().replaceAll("-", ""),
@@ -367,11 +369,14 @@ function cleanList(list: string[] | undefined): string[] {
   return (list ?? []).map((s) => s?.trim() ?? "").filter(Boolean);
 }
 
-function parseDateField(value: string | null | undefined): string | null {
+function parseDateField(value: string | null | undefined, lang: Lang): string | null {
   try {
     return parsePartialDate(value ?? null);
   } catch (err) {
-    throw new HTTPException(422, { message: err instanceof Error ? err.message : "日期无效" });
+    if (err instanceof DateParseError) {
+      throw new HTTPException(422, { message: msgFor(lang, err.code, { value: err.value }) });
+    }
+    throw new HTTPException(422, { message: msgFor(lang, "date.invalid", { value: String(value) }) });
   }
 }
 
@@ -382,7 +387,7 @@ packagesRouter.get("/api/packages", (c) => {
   const conds: string[] = [];
   const params: Array<string | number> = [];
 
-  const [cid1, none1] = parseIdFilterNullable(c.req.query("l1"));
+  const [cid1, none1] = parseIdFilterNullable(c.req.query("l1"), langOf(c));
   if (none1) {
     // "none" = 没有任何分类路径（未分类）
     conds.push("NOT EXISTS (SELECT 1 FROM package_paths pp WHERE pp.package_id = packages.id)");
@@ -390,8 +395,8 @@ packagesRouter.get("/api/packages", (c) => {
     // 同一路径上的前缀匹配：l1=X（可选再限定 l2/l3）
     let sub = "SELECT 1 FROM package_paths pp WHERE pp.package_id = packages.id AND pp.l1_id = ?";
     params.push(cid1);
-    const [cid2] = parseIdFilterNullable(c.req.query("l2"));
-    const [cid3] = parseIdFilterNullable(c.req.query("l3"));
+    const [cid2] = parseIdFilterNullable(c.req.query("l2"), langOf(c));
+    const [cid3] = parseIdFilterNullable(c.req.query("l3"), langOf(c));
     if (cid2 !== null) {
       sub += " AND pp.l2_id = ?";
       params.push(cid2);
@@ -409,8 +414,8 @@ packagesRouter.get("/api/packages", (c) => {
   }
   const statusFilter = c.req.query("status");
   if (statusFilter) {
-    if (!["未读", "在读", "已读"].includes(statusFilter)) {
-      throw new HTTPException(422, { message: "状态筛选无效" });
+    if (!["unread", "reading", "done"].includes(statusFilter)) {
+      throw new HTTPException(422, { message: msg(c, "pkg.statusFilter") });
     }
     conds.push("packages.status = ?");
     params.push(statusFilter);
@@ -420,7 +425,7 @@ packagesRouter.get("/api/packages", (c) => {
   }
   const q = c.req.query("q");
   if (q) {
-    if (q.length > 200) throw new HTTPException(422, { message: "q 最长 200" });
+    if (q.length > 200) throw new HTTPException(422, { message: msg(c, "pkg.qLen") });
     const needle = q.trim();
     if (needle.length >= 3) {
       // ≥3 字走 trigram FTS（倒排索引，子串语义与 LIKE 等价且支持中文分词）
@@ -443,13 +448,13 @@ packagesRouter.get("/api/packages", (c) => {
   };
   const sort = c.req.query("sort") ?? "newest";
   const order = orderMap[sort];
-  if (!order) throw new HTTPException(422, { message: "排序参数无效" });
+  if (!order) throw new HTTPException(422, { message: msg(c, "pkg.sortInvalid") });
 
   const page = Number(c.req.query("page") ?? 1);
   const pageSize = Number(c.req.query("page_size") ?? 20);
-  if (!Number.isInteger(page) || page < 1) throw new HTTPException(422, { message: "page 无效" });
+  if (!Number.isInteger(page) || page < 1) throw new HTTPException(422, { message: msg(c, "pkg.pageInvalid") });
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
-    throw new HTTPException(422, { message: "page_size 需在 1~100" });
+    throw new HTTPException(422, { message: msg(c, "pkg.pageSizeRange") });
   }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
@@ -464,12 +469,12 @@ packagesRouter.get("/api/packages", (c) => {
   return c.json({ total, page, page_size: pageSize, items });
 });
 
-function parseIdFilterNullable(raw: string | null | undefined): [number | null, boolean] {
+function parseIdFilterNullable(raw: string | null | undefined, lang: Lang): [number | null, boolean] {
   if (raw === null || raw === undefined || raw === "") return [null, false];
   if (raw === "none") return [null, true];
   const n = Number(raw);
   if (Number.isInteger(n) && String(n) === raw.trim()) return [n, false];
-  throw new HTTPException(422, { message: `分类参数无效：${raw}` });
+  throw new HTTPException(422, { message: msgFor(lang, "pkg.catParamInvalid", { raw }) });
 }
 
 packagesRouter.get("/api/packages/:id", (c) => {
@@ -487,7 +492,7 @@ packagesRouter.patch("/api/packages/:id", async (c) => {
 
   if (meta.classifications !== undefined && meta.classifications !== null) {
     // 整体替换所有分类路径
-    const resolved = resolvePaths(db, meta.classifications);
+    const resolved = resolvePaths(db, meta.classifications, langOf(c));
     db.prepare("DELETE FROM package_paths WHERE package_id = ?").run(pkgId);
     const insertPath = db.prepare(
       "INSERT INTO package_paths (package_id, l1_id, l2_id, l3_id, updated_at, uuid) VALUES (?, ?, ?, ?, ?, ?)",
@@ -502,7 +507,7 @@ packagesRouter.patch("/api/packages/:id", async (c) => {
 
   if (meta.title !== undefined && meta.title !== null) {
     const t = meta.title.trim();
-    if (!t || t.length > 500) throw new HTTPException(422, { message: "包名长度需在 1~500" });
+    if (!t || t.length > 500) throw new HTTPException(422, { message: msg(c, "pkg.titleLen") });
     sets.push("title = ?");
     params.push(t);
   }
@@ -512,7 +517,7 @@ packagesRouter.patch("/api/packages/:id", async (c) => {
   }
   if (meta.publish_date !== undefined) {
     sets.push("publish_date = ?");
-    params.push(parseDateField(meta.publish_date));
+    params.push(parseDateField(meta.publish_date, langOf(c)));
   }
   if (meta.publisher !== undefined) {
     sets.push("publisher = ?");
@@ -566,7 +571,7 @@ packagesRouter.post("/api/packages/:id/files", async (c) => {
   const payload = await c.req.json<{ stage_id?: string }>().catch(() => ({}) as never);
   const stagingDir = join(settings.stagingDir, payload.stage_id ?? "");
   if (!existsSync(join(stagingDir, "file"))) {
-    throw new HTTPException(404, { message: "暂存文件已过期，请重新上传" });
+    throw new HTTPException(404, { message: msg(c, "pkg.stageExpiredPlain") });
   }
   const info = JSON.parse(readFileSync(join(stagingDir, "meta.json"), "utf-8")) as {
     filename: string;
@@ -642,22 +647,22 @@ packagesRouter.post("/api/packages/:id/files/batch", async (c) => {
   const removeIds = (payload.remove_ids ?? []).filter((n) => Number.isInteger(n));
   const addStageIds = (payload.add_stage_ids ?? []).filter((s) => typeof s === "string" && s !== "");
   if (removeIds.length + addStageIds.length === 0) {
-    throw new HTTPException(422, { message: "没有任何变更" });
+    throw new HTTPException(422, { message: msg(c, "pkg.noChanges") });
   }
   // 校验移除目标属于本包；清空守卫与单删一致（移除至空包=删整包，走 DELETE 端点）
   const removeSet = new Set(removeIds);
   for (const id of removeIds) {
-    if (!pkg.files.some((f) => f.id === id)) throw new HTTPException(404, { message: `文件 ${id} 不在该包内` });
+    if (!pkg.files.some((f) => f.id === id)) throw new HTTPException(404, { message: msg(c, "pkg.fileNotInPkg", { id }) });
   }
   if (pkg.files.length - removeSet.size + addStageIds.length === 0) {
-    throw new HTTPException(422, { message: "不能移除全部文件（保存将删除整个资料包请走整包删除）" });
+    throw new HTTPException(422, { message: msg(c, "pkg.removeLastBlock") });
   }
   // 预读暂存信息（缺失/过期直接 404，不动库）
   const staged: Array<{ dir: string; filename: string; format: string; size: number; pageCount: number | null; sha?: string }> = [];
   for (const sid of addStageIds) {
     const dir = join(settings.stagingDir, sid);
     if (!existsSync(join(dir, "file"))) {
-      throw new HTTPException(404, { message: `暂存文件已过期（${sid.slice(0, 8)}…），请重新上传` });
+      throw new HTTPException(404, { message: msg(c, "pkg.stageExpired", { id: sid.slice(0, 8) }) });
     }
     const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8")) as {
       filename: string; format: string; size: number; page_count: number | null; sha256?: string;
@@ -722,7 +727,7 @@ packagesRouter.patch("/api/packages/:id/files/:fileId", async (c) => {
   const fileId = Number(c.req.param("fileId"));
   const pkg = getPackageOr404(db, pkgId);
   const f = pkg.files.find((x) => x.id === fileId);
-  if (!f) throw new HTTPException(404, { message: "包内文件不存在" });
+  if (!f) throw new HTTPException(404, { message: msg(c, "pkg.fileInPkgNotFound") });
   const payload = await c.req.json<{ name?: string; sort_order?: number }>().catch(() => ({}) as never);
   const sets: string[] = [];
   const params: Array<string | number> = [];
@@ -760,10 +765,10 @@ packagesRouter.delete("/api/packages/:id/files/:fileId", (c) => {
   const fileId = Number(c.req.param("fileId"));
   const pkg = getPackageOr404(db, pkgId);
   const f = pkg.files.find((x) => x.id === fileId);
-  if (!f) throw new HTTPException(404, { message: "包内文件不存在" });
+  if (!f) throw new HTTPException(404, { message: msg(c, "pkg.fileInPkgNotFound") });
   if (pkg.files.length === 1) {
     throw new HTTPException(422, {
-      message: "不能移除包内唯一的文件：请删除整个资料包，或先添加新文件再移除",
+      message: msg(c, "pkg.removeOnlyFile"),
     });
   }
   const filePath = join(settings.dataDir, f.file_path);
@@ -826,10 +831,10 @@ packagesRouter.get("/api/files/:fileId/cover", (c) => {
   const settings = c.get("settings");
   const fileId = Number(c.req.param("fileId"));
   const f = c.get("db").prepare("SELECT id FROM files WHERE id = ?").get(fileId);
-  if (!f) throw new HTTPException(404, { message: "文件不存在" });
+  if (!f) throw new HTTPException(404, { message: msg(c, "file.notFound") });
   const row = { id: fileId } as FileRow;
   const path = fileCoverPath(settings, row);
-  if (!existsSync(path)) throw new HTTPException(404, { message: "该文件没有封面" });
+  if (!existsSync(path)) throw new HTTPException(404, { message: msg(c, "pkg.noCover") });
   return serveFile(c, path, "image/png");
 });
 
@@ -840,12 +845,12 @@ packagesRouter.get("/api/files/:fileId/file", (c) => {
   const f = db.prepare("SELECT * FROM files WHERE id = ?").get(fileId) as
     | FileRow
     | undefined;
-  if (!f) throw new HTTPException(404, { message: "文件不存在" });
+  if (!f) throw new HTTPException(404, { message: msg(c, "file.notFound") });
   const realPath = join(settings.dataDir, f.file_path);
   if (existsSync(realPath)) {
     return serveWithRange(c, realPath, mediaTypeOf(f.format));
   }
-  throw new HTTPException(404, { message: "文件缺失（磁盘上找不到该文件的字节）" });
+  throw new HTTPException(404, { message: msg(c, "pkg.bytesMissing") });
 });
 
 function serveWithRange(c: Context<Env>, path: string, mediaType: string) {

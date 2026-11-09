@@ -1,5 +1,6 @@
 /** 应用工厂：中间件（会话校验/CORS/错误格式）、路由挂载、健康检查、SPA/静态。 */
 import { existsSync, readFileSync } from "node:fs";
+import { langOf, msg, msgFor } from "./i18n";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -47,7 +48,9 @@ export function createApp(settings = new Settings()): Hono<Env> {
   // 错误格式与 FastAPI 对齐：{"detail": message}
   app.onError((err, c) => {
     if (err instanceof HTTPException) {
-      return c.json({ detail: err.message }, err.status);
+      // 键式消息（无上下文的深层抛出，如 err.pkgNotFound / multipart）在出口按请求语言翻译
+      const detail = /^err./.test(err.message) ? msgFor(langOf(c), err.message) : err.message;
+      return c.json({ detail }, err.status);
     }
     console.error(err);
     return c.json({ detail: "Internal Server Error" }, 500);
@@ -58,7 +61,7 @@ export function createApp(settings = new Settings()): Hono<Env> {
     if (c.req.path === "/api/auth/login" || c.req.path === "/api/health") return next();
     const username = sessions.resolve(getCookie(c, SESSION_COOKIE));
     if (username === null || username !== settings.username) {
-      return c.json({ detail: "未登录或会话已过期" }, 401);
+      return c.json({ detail: msg(c, "err.unauthorized") }, 401);
     }
     c.set("username", username);
     return next();

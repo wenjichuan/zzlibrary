@@ -8,12 +8,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { api, type ShelfPackage, type ShelfSegment } from "@zzlibrary/shared/client";
 import { usePanToScroll } from "../hooks/panScroll";
+import { t, useLang, joinList, parens } from "../i18n/lang";
 import { ViewHint } from "./ui";
 import {
   SERIF,
   dayOf,
   placeholderColor,
   prettyDate,
+  statusLabel,
   toUtc,
   yearLabel,
   yearNum,
@@ -64,7 +66,7 @@ function Spine({
   const year = pkg.publish_date ? yearLabel(yearNum(pkg.publish_date)) : "";
   return (
     <button
-      title={`${pkg.title}${pkg.publish_date ? `（${year}）` : ""}`}
+      title={`${pkg.title}${pkg.publish_date ? parens(year) : ""}`}
       onClick={() => {
         hover.onLeave(); // 点击开详情即收卡——预览卡（z-50）不得盖住详情抽屉（z-30），也不留 250ms 悬停计时器
         onPackageClick(pkg.id);
@@ -121,7 +123,7 @@ function FloorSegMenu({
         style={{ left: LABEL_W + 6 }}
       >
         <div className="px-3 py-1 text-[10px] text-wood-mid">
-          {floor.label} · 时间段（新→旧）
+          {t("tl.segMenu", { name: floor.label })}
         </div>
         {[...segments]
           .filter((s) => s.end) // 无日期段（未注明时间/其他）无轴上位置，不进跳转列表
@@ -134,9 +136,9 @@ function FloorSegMenu({
             >
               <span>
                 {seg.label}
-                {seg.alias ? `（${seg.alias}）` : ""}
+                {seg.alias ? parens(seg.alias) : ""}
               </span>
-              <span className="text-[10px] text-wood-mid">{seg.count} 包</span>
+              <span className="text-[10px] text-wood-mid">{t("common.nPkgs", { n: seg.count })}</span>
             </button>
           ))}
       </div>
@@ -161,16 +163,16 @@ function SpinePreviewCard({ pkg, axis }: { pkg: ShelfPackage; axis: "publish" | 
           {pkg.title}
         </div>
         <div className="mt-1 truncate text-[10px] text-stone-500">
-          {pkg.authors.join("，") || "佚名"}
+          {joinList(pkg.authors) || t("common.anonymous")}
         </div>
         <div className="text-[10px] text-stone-500">
-          {axis === "ingest" ? `入库 ${dayOf(pkg.created_at)}` : prettyDate(pkg.publish_date)}
+          {axis === "ingest" ? t("tl.ingested", { date: dayOf(pkg.created_at) }) : prettyDate(pkg.publish_date)}
         </div>
         <div className="mt-1.5 flex flex-wrap gap-1 text-[9px]">
           <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-amber-800">
-            {pkg.file_count} 文件
+            {t("tl.nFiles", { n: pkg.file_count })}
           </span>
-          <span className="rounded-full bg-stone-100 px-1.5 py-0.5 text-stone-600">{pkg.status}</span>
+          <span className="rounded-full bg-stone-100 px-1.5 py-0.5 text-stone-600">{statusLabel(pkg.status)}</span>
         </div>
       </div>
     </div>
@@ -238,6 +240,7 @@ export function TimelineView({
   /** 滚动时实时上报横向位置（供记忆——卸载时机不可靠：passive cleanup 时 ref 已摘、节点可能已换） */
   onScrollX?: (x: number) => void;
 }) {
+  const lang = useLang((s) => s.lang); // 订阅：切语言重渲染（t 为模块级，重渲染时重算）
   const [scale, setScale] = useState(1); // 书脊大小缩放（按钮，物理尺寸；变化后重建长卷）
   const [axis, setAxis] = useState<"publish" | "ingest">("publish"); // X 轴模式：发布时间 / 入库时间
   const [segMenu, setSegMenu] = useState<number | null>(null); // 左侧架签的段选择弹层（层序号 | null）
@@ -263,7 +266,7 @@ export function TimelineView({
           : (p: ShelfPackage) => p.publish_date ?? "";
       return buildFloorAxis(floor, books, segments, keyOf, axis === "publish");
     });
-  }, [rack, axis]);
+  }, [rack, axis, lang]);
 
   const spineW = Math.max(15, Math.round(SPINE_W * scale));
   const bookH = Math.round(150 * scale);
@@ -398,7 +401,7 @@ export function TimelineView({
     const label =
       fa.floor.label.length > 6 ? fa.floor.label.slice(0, 6) + "…" : fa.floor.label;
     const n = axis === "publish" ? fa.floor.dated.length : fa.floor.total;
-    return textWidth(`${label}（${n}）`, 13) * 1.18 + 6; // vertical-rl 竖排：字高≈文本宽
+    return textWidth(`${label}${parens(String(n))}`, 13) * 1.18 + 6; // vertical-rl 竖排：字高≈文本宽
   };
   // 层体高（有书=书高+10；空层=矮位 0.6 倍）——行高计算/立柱占位/层体渲染三处共用，公式单源
   const floorBodyH = (fa: (typeof floorAxes)[number]) => (fa.books.length > 0 ? bookH + 10 : bookH * 0.6);
@@ -453,23 +456,23 @@ export function TimelineView({
           onClick={onBack}
           className="rounded-lg border border-wood-line bg-wood-cream px-3 py-1.5 text-xs text-wood-ink transition-colors hover:border-wood hover:bg-wood-cream-hover"
         >
-          ← 返回侧视
+          ← {t("tl.back")}
         </button>
         <span className="text-sm font-semibold text-wood-deep" style={{ fontFamily: SERIF }}>
           {rack.label}
         </span>
-        <span className="rounded-full bg-wood-badge px-2 py-0.5 text-xs text-wood-ink-soft">{rack.total} 包</span>
+        <span className="rounded-full bg-wood-badge px-2 py-0.5 text-xs text-wood-ink-soft">{t("common.nPkgs", { n: rack.total })}</span>
         {effRange && axisData && (
           <span className="hidden text-[11px] text-stone-400 md:inline zz-hide-short">
-            {`视口 ${yearLabel(yearOf(viewT1))} – ${yearLabel(yearOf(viewT0))}（全范围 ${yearLabel(yearOf(fullT0))} – ${yearLabel(yearOf(fullT1))}）`}
+            {t("tl.viewport", { a: yearLabel(yearOf(viewT1)), b: yearLabel(yearOf(viewT0)), c: yearLabel(yearOf(fullT0)), d: yearLabel(yearOf(fullT1)) })}
           </span>
         )}
         {/* 轴模式切换：发布时间（各层独立分段）/ 入库时间（共用日历分段）——核心功能，全尺寸保留 */}
         <div className="ml-3 flex overflow-hidden rounded border border-wood-line text-[11px] leading-none">
           {(
             [
-              ["publish", "按发布时间"],
-              ["ingest", "按入库时间"],
+              ["publish", t("tl.axisPublish")],
+              ["ingest", t("tl.axisIngest")],
             ] as const
           ).map(([mode, name]) => (
             <button
@@ -486,9 +489,9 @@ export function TimelineView({
           ))}
         </div>
         <div className="ml-auto flex items-center gap-1 text-xs text-stone-500">
-          书脊
+          {t("tl.spine")}
           <button
-            aria-label="缩小书脊"
+            aria-label={t("tl.zoomOut")}
             className="rounded border border-wood-line bg-wood-cream px-3 py-1 text-wood-ink hover:border-wood"
             onClick={() => setScale((s) => Math.max(0.6, +(s - 0.2).toFixed(1)))}
           >
@@ -496,7 +499,7 @@ export function TimelineView({
           </button>
           <span className="w-8 text-center" aria-live="off">{Math.round(scale * 100)}%</span>
           <button
-            aria-label="放大书脊"
+            aria-label={t("tl.zoomIn")}
             className="rounded border border-wood-line bg-wood-cream px-3 py-1 text-wood-ink hover:border-wood"
             onClick={() => setScale((s) => Math.min(2.0, +(s + 0.2).toFixed(1)))}
           >
@@ -508,7 +511,7 @@ export function TimelineView({
       {/* 顶部：操作提示（放滚动区外——界面说明不随横滚滑动、不作为拖拽起点）；
           手机/矮视口隐藏（提示是鼠标语义，触屏不适用且挤占书脊高度） */}
       <ViewHint className="px-5 pb-1 text-[11px] leading-4 text-stone-500">
-        拖拽=平移长卷 · 滚轮=上下浏览 · 悬停书脊=预览 · 点击书脊=详情 · 点架签=选段跳转
+        {t("tl.hintOps")}
       </ViewHint>
       {/* 时间轴主体（M3.17 立柱出卷）：外层纵向滚动；内部两列——立柱（不随横向滚动）+ 长卷（内层横向滚动）。
           两列同一纵向文档流、共用 rowHs 行高 → 架签与层板天然同行对齐；无 sticky、无悬浮遮盖，
@@ -545,7 +548,7 @@ export function TimelineView({
                   <div
                     role="button"
                     tabIndex={0}
-                    aria-label={`选择「${floor.label}」的时间段`}
+                    aria-label={t("tl.pickSeg", { name: floor.label })}
                     className="flex cursor-pointer items-center justify-center rounded-[3px] transition-colors hover:border-wood"
                     onClick={() => setSegMenu(segMenu === fi ? null : fi)}
                     onKeyDown={(e) => {
@@ -570,13 +573,13 @@ export function TimelineView({
                     }}
                     title={
                       (axis === "publish" && floor.undated.length > 0
-                        ? `另有 ${floor.undated.length} 本未注明时间，不在时间轴显示（资料包页可筛出补全） · `
-                        : "") + "点击选择时间段"
+                        ? t("tl.undatedNote", { n: floor.undated.length })
+                        : "") + t("tl.clickPick")
                     }
                   >
                     {floor.label.length > 6 ? floor.label.slice(0, 6) + "…" : floor.label}
                     <span className="text-[10px] tracking-normal text-wood-mid">
-                      （{axis === "publish" ? floor.dated.length : floor.total}）
+                      {parens(String(axis === "publish" ? floor.dated.length : floor.total))}
                     </span>
                   </div>
                   {segMenu === fi && (
@@ -626,7 +629,7 @@ export function TimelineView({
                       key={`gap${i}`}
                       className="absolute bottom-0 top-0 z-10 cursor-help border-l border-dashed border-[#8a6d4e]/60 hover:bg-[#8a6d4e]/10"
                       style={{ left: g.left, width: g.right - g.left }}
-                      title={`${yearLabel(yearOf(g.startMs - 1))} → ${yearLabel(yearOf(g.endMs))} · ${Math.round((g.endMs - g.startMs) / 3.15576e10)} 年无产出或未收录`}
+                      title={t("tl.emptyYears", { a: yearLabel(yearOf(g.startMs - 1)), b: yearLabel(yearOf(g.endMs)), n: Math.round((g.endMs - g.startMs) / 3.15576e10) })}
                     />
                   ))}
 
@@ -678,7 +681,7 @@ export function TimelineView({
                                     backgroundColor: "rgba(122, 92, 62, 0.85)",
                                     borderLeftColor: "#5c4530",
                                   }}
-                                  title={`${b.seg.label}${b.seg.alias ? `（${b.seg.alias}）` : ""} · ${b.count} 包`}
+                                  title={`${b.seg.label}${b.seg.alias ? parens(b.seg.alias) : ""} · ${t("common.nPkgs", { n: b.count })}`}
                                 >
                                   {/* 文字随视口在段带内滑移：滚进宽带内部（隋唐 1671px/拜占庭
                                       2300px+）仍恒可见；marginLeft 夹在 [0, 段宽-文字宽]，
@@ -715,7 +718,7 @@ export function TimelineView({
 
                           {floor.total === 0 && (
                             <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-[#b3a684]/70">
-                              空
+                              {t("tl.emptyFloor")}
                             </span>
                           )}
 
@@ -749,9 +752,7 @@ export function TimelineView({
 
       {/* 底部：读图要领（随轴模式变化）——放滚动区外（放长卷列里会跟 canvasW 变窄折行）；手机/矮视口隐藏让位书脊 */}
       <ViewHint className="px-5 pb-2 pt-1 text-[11px] leading-4 text-stone-500">
-        {axis === "publish"
-          ? "弹性时间轴：书多的年代长、书少的年代短；跨层同列≈同一时代 · 空档=该时代无产出或未收录（悬停示年跨） · 未注明时间不上轴（资料包页可补全）"
-          : "入库时间轴：所有层共用日历分段，同月同列"}
+        {axis === "publish" ? t("tl.hintPublish") : t("tl.hintIngest")}
       </ViewHint>
 
       {/* 书脊悬停预览卡（叶组件，ref 直驱） */}
