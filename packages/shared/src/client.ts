@@ -37,7 +37,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     window.dispatchEvent(new CustomEvent("zzlib:unauthorized"));
   }
   if (!resp.ok) {
-    let detail = `Request failed (${resp.status})`;
+    let detail = fallbackMessage(resp.status);
     try {
       const body = await resp.json();
       if (typeof body?.detail === "string") detail = body.detail;
@@ -58,6 +58,18 @@ function acceptLanguage(): string {
   } catch {
     return "";
   }
+}
+
+/** 响应体不可读（网关 502/连接中断等）时的兜底串：跟随界面语言（存了偏好用偏好，否则按浏览器语言）。 */
+function fallbackMessage(status: number): string {
+  let zh = true;
+  try {
+    const saved = localStorage.getItem("zzlib:lang");
+    zh = saved === "en" ? false : saved === "zh" ? true : (navigator.language ?? "zh").toLowerCase().startsWith("zh");
+  } catch {
+    /* 受限环境保持 zh（与服务端缺省一致） */
+  }
+  return zh ? `请求失败（${status}）` : `Request failed (${status})`;
 }
 
 function qs(params: Record<string, string | number | undefined | null>): string {

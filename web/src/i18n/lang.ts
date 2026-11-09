@@ -97,6 +97,11 @@ export function joinList(items: string[]): string {
 /** 并列顿号（中文、）——英文同为半角逗号。 */
 export const joinDun = joinList;
 
+/** 括注（计数/年份/别名）：中文全角（…）/ 英文半角 (…) 前带空格。 */
+export function parens(s: string): string {
+  return currentLang() === "zh" ? `（${s}）` : ` (${s})`;
+}
+
 /** core 展示钩子（公元前/未注明/其他）按当前语言取。 */
 export function displayI18nNow(): DisplayI18n {
   if (useLang.getState().lang === "zh") return ZH_DISPLAY;

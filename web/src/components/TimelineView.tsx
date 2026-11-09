@@ -8,7 +8,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { api, type ShelfPackage, type ShelfSegment } from "@zzlibrary/shared/client";
 import { usePanToScroll } from "../hooks/panScroll";
-import { t, useLang, joinList, currentLang } from "../i18n/lang";
+import { t, useLang, joinList, parens } from "../i18n/lang";
 import { ViewHint } from "./ui";
 import {
   SERIF,
@@ -66,7 +66,7 @@ function Spine({
   const year = pkg.publish_date ? yearLabel(yearNum(pkg.publish_date)) : "";
   return (
     <button
-      title={`${pkg.title}${pkg.publish_date ? `（${year}）` : ""}`}
+      title={`${pkg.title}${pkg.publish_date ? parens(year) : ""}`}
       onClick={() => {
         hover.onLeave(); // 点击开详情即收卡——预览卡（z-50）不得盖住详情抽屉（z-30），也不留 250ms 悬停计时器
         onPackageClick(pkg.id);
@@ -136,7 +136,7 @@ function FloorSegMenu({
             >
               <span>
                 {seg.label}
-                {seg.alias ? (currentLang() === "zh" ? `（${seg.alias}）` : ` (${seg.alias})`) : ""}
+                {seg.alias ? parens(seg.alias) : ""}
               </span>
               <span className="text-[10px] text-wood-mid">{t("common.nPkgs", { n: seg.count })}</span>
             </button>
@@ -401,7 +401,7 @@ export function TimelineView({
     const label =
       fa.floor.label.length > 6 ? fa.floor.label.slice(0, 6) + "…" : fa.floor.label;
     const n = axis === "publish" ? fa.floor.dated.length : fa.floor.total;
-    return textWidth(`${label}（${n}）`, 13) * 1.18 + 6; // vertical-rl 竖排：字高≈文本宽
+    return textWidth(`${label}${parens(String(n))}`, 13) * 1.18 + 6; // vertical-rl 竖排：字高≈文本宽
   };
   // 层体高（有书=书高+10；空层=矮位 0.6 倍）——行高计算/立柱占位/层体渲染三处共用，公式单源
   const floorBodyH = (fa: (typeof floorAxes)[number]) => (fa.books.length > 0 ? bookH + 10 : bookH * 0.6);
@@ -579,7 +579,7 @@ export function TimelineView({
                   >
                     {floor.label.length > 6 ? floor.label.slice(0, 6) + "…" : floor.label}
                     <span className="text-[10px] tracking-normal text-wood-mid">
-                      （{axis === "publish" ? floor.dated.length : floor.total}）
+                      {parens(String(axis === "publish" ? floor.dated.length : floor.total))}
                     </span>
                   </div>
                   {segMenu === fi && (
@@ -681,7 +681,7 @@ export function TimelineView({
                                     backgroundColor: "rgba(122, 92, 62, 0.85)",
                                     borderLeftColor: "#5c4530",
                                   }}
-                                  title={`${b.seg.label}${b.seg.alias ? (currentLang() === "zh" ? `（${b.seg.alias}）` : ` (${b.seg.alias})`) : ""} · ${t("common.nPkgs", { n: b.count })}`}
+                                  title={`${b.seg.label}${b.seg.alias ? parens(b.seg.alias) : ""} · ${t("common.nPkgs", { n: b.count })}`}
                                 >
                                   {/* 文字随视口在段带内滑移：滚进宽带内部（隋唐 1671px/拜占庭
                                       2300px+）仍恒可见；marginLeft 夹在 [0, 段宽-文字宽]，
