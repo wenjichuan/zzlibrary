@@ -18,7 +18,8 @@ import { Readable } from "node:stream";
 import { createHash, randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { detectFormat, displayDate, mediaTypeOf, parsePartialDate, sanitizeName, stemTitle } from "@zzlibrary/core";
+import { detectFormat, displayDate, mediaTypeOf, parsePartialDate, sanitizeName, stemTitle, DateParseError } from "@zzlibrary/core";
+import { langOf, msgFor, type Lang } from "../i18n";
 import type { Env } from "../env";
 import { resolvePaths } from "../deps";
 import { streamMultipart } from "../multipart";
@@ -268,6 +269,7 @@ interface CommitPayload {
 packagesRouter.post("/api/packages", async (c) => {
   const db = c.get("db");
   const settings = c.get("settings");
+  const lang = langOf(c);
   const payload = await c.req.json<CommitPayload>().catch(() => ({}) as never);
   const stageIds = payload.stage_ids ?? [];
   if (stageIds.length === 0) throw new HTTPException(422, { message: "stage_ids 不能为空" });
@@ -292,7 +294,7 @@ packagesRouter.post("/api/packages", async (c) => {
   }
 
   const resolvedPaths = resolvePaths(db, meta.classifications);
-  const publishDate = parseDateField(meta.publish_date);
+  const publishDate = parseDateField(meta.publish_date, lang);
 
   const { pkgId, packageCover } = inTransaction(db, () => {
     const ins = db
@@ -367,11 +369,14 @@ function cleanList(list: string[] | undefined): string[] {
   return (list ?? []).map((s) => s?.trim() ?? "").filter(Boolean);
 }
 
-function parseDateField(value: string | null | undefined): string | null {
+function parseDateField(value: string | null | undefined, lang: Lang): string | null {
   try {
     return parsePartialDate(value ?? null);
   } catch (err) {
-    throw new HTTPException(422, { message: err instanceof Error ? err.message : "日期无效" });
+    if (err instanceof DateParseError) {
+      throw new HTTPException(422, { message: msgFor(lang, err.code, { value: err.value }) });
+    }
+    throw new HTTPException(422, { message: msgFor(lang, "date.invalid", { value: String(value) }) });
   }
 }
 
@@ -512,7 +517,7 @@ packagesRouter.patch("/api/packages/:id", async (c) => {
   }
   if (meta.publish_date !== undefined) {
     sets.push("publish_date = ?");
-    params.push(parseDateField(meta.publish_date));
+    params.push(parseDateField(meta.publish_date, langOf(c)));
   }
   if (meta.publisher !== undefined) {
     sets.push("publisher = ?");

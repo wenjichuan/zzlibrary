@@ -13,6 +13,7 @@
  */
 import { displayDate } from "./dates";
 import { computeGrid, indexFor, type Segment, type SegmentConfigLike } from "./segmentation";
+import { ZH_DISPLAY, type DisplayI18n } from "./displayI18n";
 
 export interface AggCategory {
   id: number;
@@ -137,6 +138,7 @@ export function buildShelves(
   cats: Map<number, AggCategory>,
   configRows: SegmentConfigRow[],
   includePackages = false,
+  i18n: DisplayI18n = ZH_DISPLAY,
 ): ShelvesPayload {
   // (包, 路径) 对 → 按 (pkg, l2, l3) 去重（首个命中保留）
   const pairs = new Map<string, { pkg: AggPackage; path: AggPath }>();
@@ -196,6 +198,7 @@ export function buildShelves(
       const grid: Segment[] = computeGrid(
         shelfPkgs.map((p) => p.publish_date),
         config,
+        i18n,
       );
 
       const counts: Record<string, number> = {};
