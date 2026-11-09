@@ -36,13 +36,7 @@ docker run -d --name zzlibrary -p 8000:8000 \
 
 ## 部署
 
-部署细节、环境变量与**安全须知**（改默认密码；勿公网裸奔，远程访问推荐 Tailscale/WireGuard 组网）见 [DEPLOY.md](DEPLOY.md)：
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `ZZLIB_DATA_DIR` | `<解压目录>/data` | 数据目录（可指到别的盘） |
-| `ZZLIB_PORT` | `8000` | 监听端口 |
-| `ZZLIB_USERNAME` / `ZZLIB_PASSWORD` | `admin` / `zzlibrary` | 登录账号（**请改密码**） |
+部署细节、环境变量、**安全须知**（改默认密码；勿公网裸奔，远程访问推荐 Tailscale/WireGuard 组网）与常见问题，见 **[DEPLOY.md](DEPLOY.md)**（唯一权威，环境变量表不再在此重复维护）。
 
 ## 路线图
 

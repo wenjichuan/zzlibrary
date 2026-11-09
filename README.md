@@ -36,7 +36,7 @@ docker run -d --name zzlibrary -p 8000:8000 \
 
 Every device on your LAN (phone, tablet) can open the same library at `http://<server-ip>:8000`.
 
-Deployment details, environment variables and **security notes** (change the default password; don't expose directly to the public internet — use Tailscale/WireGuard): see [DEPLOY.md](DEPLOY.md) / [部署指南](README.zh-CN.md#部署).
+Deployment details, environment variables and **security notes** (change the default password; don't expose directly to the public internet — use Tailscale/WireGuard): see the deployment guide [DEPLOY.md](DEPLOY.md) (in Chinese; the Docker/zip snippets above cover the basics).
 
 ## Roadmap
 
