@@ -100,7 +100,9 @@ export function statusLabel(s: string): string {
   return s;
 }
 
-export const SERIF = `"Noto Serif SC", "Songti SC", SimSun, serif`;
+/** 衬线栈：Noto Serif SC（Google Fonts 命名，本地）→ Noto Serif CJK SC（apt fonts-noto-cjk 的家族名，
+ * CI 截图环境；竖排 vertical-rl 下落到 generic serif 会让 CJK 逐字回退、竖排度量合成坏掉——字符挤压重叠）。 */
+export const SERIF = `"Noto Serif SC", "Noto Serif CJK SC", "Songti SC", SimSun, serif`;
 
 export function placeholderColor(id: number): string {
   const hue = (id * 137.508) % 360;
