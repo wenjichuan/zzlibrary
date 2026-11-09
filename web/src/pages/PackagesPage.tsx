@@ -5,6 +5,7 @@ import PackageMetaForm, { metaFromPackage, metaToInput, type MetaFormValue } fro
 import { Button, Empty, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
+import { useT } from "../i18n/lang";
 import { prettyDate, statusLabel } from "../components/shelfVM";
 import { useReaderOverlay } from "../components/ReaderOverlay";
 import PackageDetailBody, { fmtPath } from "../components/PackageDetailBody";
@@ -14,16 +15,18 @@ import { renderPdfCover } from "../utils/pdfCover";
 /** 格式筛选选项从 core 格式注册表派生（全量规范名），勿手抄清单 */
 const FORMATS = ["", ...CANONICAL_FORMATS];
 const STATUSES = ["", "unread", "reading", "done"];
-const SORTS: Record<string, string> = {
-  newest: "最新入库",
-  oldest: "最早入库",
-  title: "名称",
-  date_asc: "时间 ↑",
-  date_desc: "时间 ↓",
+const SORT_KEYS = ["newest", "oldest", "title", "date_asc", "date_desc"] as const;
+const SORT_LABELS: Record<(typeof SORT_KEYS)[number], "pkg.sortNewest" | "pkg.sortOldest" | "pkg.sortTitle" | "pkg.sortAsc" | "pkg.sortDesc"> = {
+  newest: "pkg.sortNewest",
+  oldest: "pkg.sortOldest",
+  title: "pkg.sortTitle",
+  date_asc: "pkg.sortAsc",
+  date_desc: "pkg.sortDesc",
 };
 
 /** 页码直达输入框：原「第几页 / 总页数」位置——键入页数回车（或失焦）跳转，越界夹取到 [1, totalPages]，非数字忽略 */
 function PageJump({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
+  const t = useT();
   const [text, setText] = useState(String(page));
   useEffect(() => setText(String(page)), [page]);
   const commit = () => {
@@ -34,7 +37,7 @@ function PageJump({ page, totalPages, onPage }: { page: number; totalPages: numb
   return (
     <span className="flex items-center gap-1">
       <input
-        aria-label="跳转到指定页"
+        aria-label={t("pkg.pageJump")}
         value={text}
         onChange={(e) => setText(e.target.value.replace(/\D/g, ""))}
         onBlur={commit}
@@ -52,6 +55,7 @@ function PageJump({ page, totalPages, onPage }: { page: number; totalPages: numb
 }
 
 export default function PackagesPage() {
+  const t = useT();
   const [data, setData] = useState<PackagePage | null>(null);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(() => {
@@ -91,7 +95,7 @@ export default function PackagesPage() {
       if (ac.signal.aborted) return;
       setData(resp);
     } catch (err) {
-      if (!ac.signal.aborted) push("error", err instanceof Error ? err.message : "加载失败");
+      if (!ac.signal.aborted) push("error", err instanceof Error ? err.message : t("common.loadFail"));
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
@@ -143,19 +147,19 @@ export default function PackagesPage() {
     try {
       setEditing(await api.getPackage(pkg.id));
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "加载失败");
+      push("error", err instanceof Error ? err.message : t("common.loadFail"));
     }
   };
 
   const remove = async (pkg: Package) => {
-    if (!window.confirm(`确定删除资料包「${pkg.title}」？包内 ${pkg.file_count} 个文件会一并删除。`)) return;
+    if (!window.confirm(t("pkg.deleteConfirm", { name: pkg.title, n: pkg.file_count }))) return;
     try {
       await api.deletePackage(pkg.id);
-      push("success", "已删除");
+      push("success", t("pkg.deleted"));
       // 乐观更新：就地移除该行，不整表重拉
       setData((prev) => (prev ? { ...prev, total: prev.total - 1, items: prev.items.filter((p) => p.id !== pkg.id) } : prev));
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "删除失败");
+      push("error", err instanceof Error ? err.message : t("common.deleteFail"));
     }
   };
 
@@ -164,10 +168,10 @@ export default function PackagesPage() {
   return (
     <div className="mx-auto max-w-6xl px-6 py-6">
       <PageHeader
-        title="资料包"
+        title={t("nav.packages")}
         actions={
           <Button variant="outline" onClick={() => void load()}>
-            刷新
+            {t("pkg.refresh")}
           </Button>
         }
       />
@@ -175,7 +179,7 @@ export default function PackagesPage() {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input
           className="w-full sm:w-56"
-          placeholder="搜索包名/作者/备注…"
+          placeholder={t("pkg.search")}
           value={qText}
           onChange={(e) => setQText(e.target.value)}
           onKeyDown={(e) => {
@@ -183,15 +187,15 @@ export default function PackagesPage() {
           }}
         />
         <Select className="w-full sm:w-32" value={filters.l1} onChange={(e) => applyFilters((f) => ({ ...f, l1: e.target.value, l2: "", l3: "" }))}>
-          <option value="">全部分类</option>
+          <option value="">{t("pkg.allCat")}</option>
           {l1.map((n) => (
             <option key={n.id} value={n.id}>{n.name}</option>
           ))}
-          <option value="none">未分类</option>
+          <option value="none">{t("common.uncategorized")}</option>
         </Select>
         {filters.l1 && (
           <Select className="w-full sm:w-32" value={filters.l2} onChange={(e) => applyFilters((f) => ({ ...f, l2: e.target.value, l3: "" }))}>
-            <option value="">全部二级</option>
+            <option value="">{t("pkg.allL2")}</option>
             {l2Options.map((n) => (
               <option key={n.id} value={n.id}>{n.name}</option>
             ))}
@@ -199,7 +203,7 @@ export default function PackagesPage() {
         )}
         {filters.l2 && (
           <Select className="w-full sm:w-32" value={filters.l3} onChange={(e) => applyFilters((f) => ({ ...f, l3: e.target.value }))}>
-            <option value="">全部三级</option>
+            <option value="">{t("pkg.allL3")}</option>
             {l3Options.map((n) => (
               <option key={n.id} value={n.id}>{n.name}</option>
             ))}
@@ -207,21 +211,21 @@ export default function PackagesPage() {
         )}
         <Select className="w-full sm:w-28" value={filters.format} onChange={(e) => applyFilters((f) => ({ ...f, format: e.target.value }))}>
           {FORMATS.map((f) => (
-            <option key={f} value={f}>{f ? `${FORMAT_ICONS[f] ?? ""} ${f.toUpperCase()}` : "全部格式"}</option>
+            <option key={f} value={f}>{f ? `${FORMAT_ICONS[f] ?? ""} ${f.toUpperCase()}` : t("pkg.allFormat")}</option>
           ))}
         </Select>
         <Select className="w-full sm:w-24" value={filters.status} onChange={(e) => applyFilters((f) => ({ ...f, status: e.target.value }))}>
           {STATUSES.map((s) => (
-            <option key={s} value={s}>{s ? statusLabel(s) : "全部状态"}</option>
+            <option key={s} value={s}>{s ? statusLabel(s) : t("pkg.allStatus")}</option>
           ))}
         </Select>
         <Select className="w-full sm:w-28" value={filters.undated} onChange={(e) => applyFilters((f) => ({ ...f, undated: e.target.value }))}>
-          <option value="">全部时间</option>
-          <option value="1">未注明时间</option>
+          <option value="">{t("pkg.allTime")}</option>
+          <option value="1">{t("common.undated")}</option>
         </Select>
         <Select className="w-full sm:w-28" value={filters.sort} onChange={(e) => applyFilters((f) => ({ ...f, sort: e.target.value }))}>
-          {Object.entries(SORTS).map(([v, label]) => (
-            <option key={v} value={v}>{label}</option>
+          {SORT_KEYS.map((v) => (
+            <option key={v} value={v}>{t(SORT_LABELS[v])}</option>
           ))}
         </Select>
       </div>
@@ -229,18 +233,18 @@ export default function PackagesPage() {
       {loading && !data ? (
         <Spinner />
       ) : !data || data.items.length === 0 ? (
-        <Empty icon="📦" title="还没有资料包" hint="到「入库」页上传文件，多个文件可以合并成一个包" />
+        <Empty icon="📦" title={t("pkg.emptyTitle")} hint={t("pkg.emptyHint")} />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b border-stone-200 bg-stone-50 text-left text-xs text-stone-500">
-                <th className="w-14 px-4 py-3">封面</th>
-                <th className="px-4 py-3">包名</th>
-                <th className="px-4 py-3">分类</th>
-                <th className="w-28 px-4 py-3">时间</th>
-                <th className="w-16 px-4 py-3">状态</th>
-                <th className="w-28 px-4 py-3 text-right">操作</th>
+                <th className="w-14 px-4 py-3">{t("pkg.thCover")}</th>
+                <th className="px-4 py-3">{t("pkg.thName")}</th>
+                <th className="px-4 py-3">{t("pkg.thCat")}</th>
+                <th className="w-28 px-4 py-3">{t("pkg.thTime")}</th>
+                <th className="w-16 px-4 py-3">{t("pkg.thStatus")}</th>
+                <th className="w-28 px-4 py-3 text-right">{t("pkg.thActions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -261,7 +265,7 @@ export default function PackagesPage() {
                       {pkg.title}
                     </div>
                     <div className="text-xs text-stone-500">
-                      {pkg.authors.join("，") || "—"} · {pkg.file_count} 个文件 · {formatBytes(pkg.total_size)}
+                      {pkg.authors.join(", ") || "—"} · {t("common.nFiles", { n: pkg.file_count })} · {formatBytes(pkg.total_size)}
                     </div>
                   </td>
                   <td className="px-4 py-2.5 text-xs text-stone-600">
@@ -270,7 +274,7 @@ export default function PackagesPage() {
                         {pkg.classifications.map(fmtPath).join(" · ")}
                       </span>
                     ) : (
-                      <span className="text-stone-400">未分类</span>
+                      <span className="text-stone-400">{t("common.uncategorized")}</span>
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-stone-600">{prettyDate(pkg.publish_date)}</td>
@@ -288,22 +292,22 @@ export default function PackagesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-right text-xs">
-                    <Button variant="ghost" size="sm" className="mr-2" onClick={() => void openEdit(pkg)}>编辑</Button>
-                    <Button variant="danger" size="sm" onClick={() => void remove(pkg)}>删除</Button>
+                    <Button variant="ghost" size="sm" className="mr-2" onClick={() => void openEdit(pkg)}>{t("pkg.edit")}</Button>
+                    <Button variant="danger" size="sm" onClick={() => void remove(pkg)}>{t("common.delete")}</Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="flex items-center justify-between border-t border-stone-200 px-4 py-3 text-xs text-stone-500">
-            <span>共 {data.total} 包</span>
+            <span>{t("pkg.total", { n: data.total })}</span>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                ← 上一页
+                {t("pkg.prev")}
               </Button>
               <PageJump page={data.page} totalPages={totalPages} onPage={setPage} />
               <Button variant="ghost" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-                下一页 →
+                {t("pkg.next")}
               </Button>
             </div>
           </div>
@@ -355,14 +359,15 @@ function DetailModal({
   onEdit: () => void;
   onRead: (file: FileDetail) => void;
 }) {
+  const t = useT();
   return (
-    <Modal title="资料包详情" onClose={onClose} wide>
+    <Modal title={t("pkg.detailTitle")} onClose={onClose} wide>
       <PackageDetailBody
         detail={detail}
         onRead={onRead}
         metaExtra={
           <Button variant="outline" size="sm" onClick={onEdit}>
-            编辑
+            {t("pkg.edit")}
           </Button>
         }
       />
@@ -379,6 +384,7 @@ function EditModal({
   onClose: () => void;
   onSaved: (fresh: PackageDetail | null) => void;
 }) {
+  const t = useT();
   const [form, setForm] = useState<MetaFormValue>(() => metaFromPackage(detail));
   const [title, setTitle] = useState(detail.title);
   const [busy, setBusy] = useState(false);
@@ -414,7 +420,7 @@ function EditModal({
           },
         ]);
       } catch (err) {
-        push("error", `${file.name}：${err instanceof Error ? err.message : "上传失败"}`);
+        push("error", t("edit.uploadFail", { name: file.name, msg: err instanceof Error ? err.message : "" }));
       }
     }
   };
@@ -432,7 +438,7 @@ function EditModal({
   const markRemove = (f: FileDetail) => {
     // 标记是可撤销操作（全部撤销/取消都兜底），无需重确认；空包后果由文件数旁红字持续提示，
     // 真正的确认门设在保存（不可逆删除）那一步，只弹一次。
-    if (!window.confirm(`标记移除「${f.name}」？（保存时生效，取消编辑可撤销）`)) return;
+    if (!window.confirm(t("edit.markRemoveConfirm", { name: f.name }))) return;
     setRemoveIds((prev) => new Set(prev).add(f.id));
   };
 
@@ -440,17 +446,17 @@ function EditModal({
 
   const saveAll = async () => {
     if (!title.trim() && !willBeEmpty) {
-      push("error", "包名不能为空");
+      push("error", t("edit.pkgNameEmpty"));
       return;
     }
-    if (willBeEmpty && !window.confirm("包内已无文件：保存将删除整个资料包（含元数据与分类），确定？")) {
+    if (willBeEmpty && !window.confirm(t("edit.willDeleteConfirm"))) {
       return;
     }
     setBusy(true);
     try {
       if (willBeEmpty) {
         await api.deletePackage(detail.id);
-        push("success", "包内已无文件，资料包已删除");
+        push("success", t("edit.deletedToast"));
         onSaved(null);
         return;
       }
@@ -465,10 +471,10 @@ function EditModal({
       }
       setPendingAdds([]); // 已入包，暂存被后端清除
       const fresh = await api.updatePackage(detail.id, metaToInput({ ...form, title }));
-      push("success", "已保存");
+      push("success", t("edit.saved"));
       onSaved(fresh);
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "保存失败（部分改动可能已生效，请重试）");
+      push("error", err instanceof Error ? err.message : t("edit.saveFail"));
       discardPending(); // 未入包的暂存立即废弃，避免残留
       onSaved(null); // 状态可能部分变化，关闭并刷新列表
     } finally {
@@ -483,15 +489,15 @@ function EditModal({
       setFiles((prev) => prev.map((f) => (f.id === updated.id ? { ...f, name: updated.name } : f)));
       setRenaming(null);
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "重命名失败");
+      push("error", err instanceof Error ? err.message : t("cat.renameFail"));
     }
   };
 
   return (
-    <Modal title="编辑资料包" onClose={cancel} wide>
+    <Modal title={t("edit.title")} onClose={cancel} wide>
       <div className="space-y-4">
         <div>
-          <div className="mb-1.5 text-sm font-medium text-stone-700">包名</div>
+          <div className="mb-1.5 text-sm font-medium text-stone-700">{t("edit.pkgName")}</div>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <PackageMetaForm value={form} onChange={setForm} />
@@ -500,11 +506,11 @@ function EditModal({
         <div className="rounded-xl border border-stone-200 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-semibold text-stone-700">
-              包内文件（{finalCount}）
-              {willBeEmpty && <span className="ml-2 text-xs font-normal text-red-600">保存将删除整个资料包</span>}
+              {t("edit.filesTitle", { n: finalCount })}
+              {willBeEmpty && <span className="ml-2 text-xs font-normal text-red-600">{t("edit.willDeleteHint")}</span>}
             </span>
             <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
-              ＋ 添加文件
+              {t("edit.addFile")}
             </Button>
             <input
               ref={fileInput}
@@ -518,7 +524,7 @@ function EditModal({
             />
           </div>
           <div className="mb-2 text-[11px] text-stone-400">
-            文件增删在保存时生效；点「取消」全部撤销（新文件的暂存立即删除）
+            {t("edit.filesHint")}
           </div>
           <div className="space-y-2">
             {keptFiles.map((f) => (
@@ -533,8 +539,8 @@ function EditModal({
                       onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
                       onKeyDown={(e) => e.key === "Enter" && void saveRename()}
                     />
-                    <Button size="sm" onClick={() => void saveRename()}>保存</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setRenaming(null)}>取消</Button>
+                    <Button size="sm" onClick={() => void saveRename()}>{t("common.save")}</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRenaming(null)}>{t("common.cancel")}</Button>
                   </>
                 ) : (
                   <>
@@ -548,10 +554,10 @@ function EditModal({
                       className="text-xs text-stone-500 hover:text-amber-700"
                       onClick={() => setRenaming({ id: f.id, name: f.name })}
                     >
-                      重命名
+                      {t("edit.rename")}
                     </button>
                     <button className="text-xs text-stone-500 hover:text-red-600" onClick={() => markRemove(f)}>
-                      移除
+                      {t("edit.remove")}
                     </button>
                   </>
                 )}
@@ -566,7 +572,7 @@ function EditModal({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm text-stone-800">{a.name}</div>
                   <div className="text-xs text-stone-500">
-                    {String(a.format).toUpperCase()} · {formatBytes(a.size)} · 保存时加入
+                    {String(a.format).toUpperCase()} · {formatBytes(a.size)} · {t("edit.addOnSave")}
                   </div>
                 </div>
                 <button
@@ -576,15 +582,15 @@ function EditModal({
                     setPendingAdds((prev) => prev.filter((x) => x.key !== a.key));
                   }}
                 >
-                  移除
+                  {t("edit.remove")}
                 </button>
               </div>
             ))}
             {removedFiles.length > 0 && (
               <div className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-500">
-                <span>已标记移除 {removedFiles.length} 个：{removedFiles.map((f) => f.name).join("、")}</span>
+                <span>{t("edit.removedN", { n: removedFiles.length, names: removedFiles.map((f) => f.name).join(", ") })}</span>
                 <button className="text-amber-700 hover:underline" onClick={() => setRemoveIds(new Set())}>
-                  全部撤销
+                  {t("edit.undoAll")}
                 </button>
               </div>
             )}
@@ -592,8 +598,8 @@ function EditModal({
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={cancel}>取消</Button>
-          <Button onClick={() => void saveAll()} disabled={busy}>{busy ? "保存中…" : "保存"}</Button>
+          <Button variant="ghost" onClick={cancel}>{t("common.cancel")}</Button>
+          <Button onClick={() => void saveAll()} disabled={busy}>{busy ? t("common.saving") : t("common.save")}</Button>
         </div>
       </div>
     </Modal>

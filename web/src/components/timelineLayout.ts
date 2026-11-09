@@ -15,6 +15,7 @@
 性能：建卷 O(书数 + 段数·log) 一次；滚动时布局零计算（浏览器原生滚动合成）。 */
 import type { ShelfPackage, ShelfSegment } from "@zzlibrary/shared/client";
 import { dayOf, toUtc, type FloorVM } from "./shelfVM";
+import { t } from "../i18n/lang";
 
 /* ---------- 常量 ---------- */
 
@@ -369,7 +370,7 @@ export function ingestSegments(range: { start: string; end: string }): ShelfSegm
     if (unit === "week") {
       seg = {
         key: `in-${ymd(s)}`,
-        label: `${pad2(m + 1)}-${pad2(s.getUTCDate())} 周`,
+        label: t("tl.week", { m: pad2(m + 1), d: pad2(s.getUTCDate()) }),
         alias: `${y}.${pad2(m + 1)}`,
         start: ymd(s),
         end: ymd(e),
@@ -378,7 +379,7 @@ export function ingestSegments(range: { start: string; end: string }): ShelfSegm
     } else if (unit === "month") {
       seg = {
         key: `in-${y}-${pad2(m + 1)}`,
-        label: `${y}年${m + 1}月`,
+        label: t("tl.ym", { y, m: m + 1 }),
         alias: `${String(y).slice(2)}.${pad2(m + 1)}`,
         start: ymd(s),
         end: ymd(e),
@@ -388,14 +389,14 @@ export function ingestSegments(range: { start: string; end: string }): ShelfSegm
       const q = Math.floor(m / 3) + 1;
       seg = {
         key: `in-${y}-Q${q}`,
-        label: `${y}年 Q${q}`,
+        label: t("tl.quarter", { y, q }),
         alias: `Q${q}`,
         start: ymd(s),
         end: ymd(e),
         count: 0,
       };
     } else {
-      seg = { key: `in-${y}`, label: `${y}年`, alias: String(y), start: ymd(s), end: ymd(e), count: 0 };
+      seg = { key: `in-${y}`, label: t("tl.year", { y }), alias: String(y), start: ymd(s), end: ymd(e), count: 0 };
     }
     out.push(seg);
     s = e;

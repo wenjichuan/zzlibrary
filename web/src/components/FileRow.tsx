@@ -1,5 +1,6 @@
 import { isReadableFormat } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail } from "@zzlibrary/shared/client";
+import { t } from "../i18n/lang";
 
 /** 格式图标的唯一出处（各页共用，勿再另建副本） */
 export const FORMAT_ICONS: Record<string, string> = {
@@ -14,8 +15,8 @@ function metaText(file: FileDetail, showProgress?: boolean): string {
   return [
     String(file.format).toUpperCase(),
     formatBytes(file.file_size),
-    file.page_count ? `${file.page_count} 页` : "",
-    showProgress && file.progress ? `已看 ${Math.round(file.progress.percent)}%` : "",
+    file.page_count ? t("common.nPages", { n: file.page_count }) : "",
+    showProgress && file.progress ? t("common.watched", { n: Math.round(file.progress.percent) }) : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -66,17 +67,17 @@ export default function FileRow({
               : "cursor-not-allowed rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs text-stone-300"
           }
           disabled={!readable}
-          title={readable ? undefined : "该格式暂不支持在线阅览，可另存后用本地应用打开"}
+          title={readable ? undefined : t("file.unreadableTitle")}
           onClick={() => onRead?.(file)}
         >
-          阅览
+          {t("file.read")}
         </button>
         <a
           className="rounded-lg border border-stone-300 px-2.5 py-1.5 text-xs text-stone-700 hover:border-amber-600 hover:text-amber-800"
           href={api.fileUrl(file.id)}
           download={file.name}
         >
-          另存
+          {t("file.saveAs")}
         </a>
       </div>
     </div>

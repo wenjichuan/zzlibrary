@@ -6,6 +6,7 @@ import PackageMetaForm, { emptyMeta, metaToInput, type MetaFormValue } from "../
 import { Button, Input, PageHeader } from "../components/ui";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
+import { useT } from "../i18n/lang";
 import { renderPdfCover } from "../utils/pdfCover";
 
 /** 已暂存文件 */
@@ -21,6 +22,7 @@ interface StagedItem {
  * 放弃（移除文件/离开页面）即废弃对应暂存。
  */
 export default function UploadPage() {
+  const t = useT();
   const [items, setItems] = useState<StagedItem[]>([]);
   const [title, setTitle] = useState("");
   const [titleTouched, setTitleTouched] = useState(false); // 用户改过包名后不再自动预填
@@ -103,7 +105,7 @@ export default function UploadPage() {
             metaPrefilled.current = true;
             setMeta((prev) => ({
               ...prev,
-              authors: staged.meta.authors.join("，"),
+              authors: staged.meta.authors.join(","),
               publish_date: staged.meta.publish_date ?? "",
               publisher: staged.meta.publisher ?? "",
             }));
@@ -111,7 +113,7 @@ export default function UploadPage() {
         } catch (err) {
           setItems((prev) =>
             prev.map((it) =>
-              it.key === item.key ? { ...it, error: err instanceof Error ? err.message : "上传失败" } : it,
+              it.key === item.key ? { ...it, error: err instanceof Error ? err.message : t("upload.uploadFailShort") } : it,
             ),
           );
         }
@@ -137,7 +139,7 @@ export default function UploadPage() {
 
   const commit = async () => {
     if (!title.trim()) {
-      push("error", "多文件包需要命名：请填写包名");
+      push("error", t("upload.nameRequired"));
       return;
     }
     const stageIds = stagedItems.map((i) => i.staged!.stage_id);
@@ -148,9 +150,9 @@ export default function UploadPage() {
       // 记账按 item.key（liveStages.set 的键）——已入库的 stage 不再被离开页面的 discard 误伤
       for (const it of stagedItems) liveStages.current.delete(it.key);
       setDonePkg({ id: pkg.id, title: pkg.title });
-      push("success", `已入库「${pkg.title}」`);
+      push("success", t("upload.doneToast", { name: pkg.title }));
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "入库失败");
+      push("error", err instanceof Error ? err.message : t("upload.commitFail"));
     } finally {
       setBusy(false);
     }
@@ -177,19 +179,19 @@ export default function UploadPage() {
       <div className="text-xs leading-5 text-stone-500">
         {items.length > 0 ? (
           <>
-            继续拖拽文件到此处，或
+            {t("upload.dropIntroMore")}
             <button className="mx-1 text-amber-700 hover:underline" onClick={() => fileInput.current?.click()}>
-              点击选择
+              {t("upload.choose")}
             </button>
-            ，新文件将加入本包
+            {t("upload.dropOutroMore")}
           </>
         ) : (
           <>
-            拖拽任意文件到此处，或
+            {t("upload.dropIntro")}
             <button className="mx-1 text-amber-700 hover:underline" onClick={() => fileInput.current?.click()}>
-              点击选择
+              {t("upload.choose")}
             </button>
-            ，本次上传的所有文件将组成<b>一个资料包</b>
+            {t("upload.dropOutroA")}<b>{t("upload.dropOutroB")}</b>
           </>
         )}
       </div>
@@ -212,18 +214,18 @@ export default function UploadPage() {
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
       <PageHeader
-        title="入库"
+        title={t("upload.title")}
         actions={
           donePkg ? (
             <Button variant="outline" onClick={reset}>
-              再入一包
+              {t("upload.again")}
             </Button>
           ) : items.length > 0 ? (
             <Button
               onClick={() => void commit()}
               disabled={busy || uploading || stagedItems.length === 0 || !title.trim()}
             >
-              {busy ? "入库中…" : `入库（${stagedItems.length} 个文件 · ${formatBytes(totalSize)}）`}
+              {busy ? t("upload.committing") : t("upload.commitBtn", { n: stagedItems.length, size: formatBytes(totalSize) })}
             </Button>
           ) : null
         }
@@ -233,13 +235,13 @@ export default function UploadPage() {
         <div className="space-y-4">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
             <div className="text-3xl">📦</div>
-            <div className="mt-2 text-sm font-semibold text-emerald-800">已入库「{donePkg.title}」</div>
+            <div className="mt-2 text-sm font-semibold text-emerald-800">{t("upload.doneTitle", { name: donePkg.title })}</div>
             <div className="mt-3 flex justify-center gap-2">
               <Button variant="outline" size="sm" onClick={() => navigate("/packages")}>
-                查看资料包列表 →
+                {t("upload.viewList")}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-                去书架看看
+                {t("upload.goShelves")}
               </Button>
             </div>
           </div>
@@ -256,8 +258,8 @@ export default function UploadPage() {
           <div className="rounded-xl border border-stone-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between text-sm">
               <span className="font-medium text-stone-700">
-                本包文件 {stagedItems.length} 个 · {formatBytes(totalSize)}
-                {uploading && <span className="ml-2 text-xs text-amber-700">正在上传/抽取元数据…</span>}
+                {t("upload.pkgFiles", { n: stagedItems.length, size: formatBytes(totalSize) })}
+                {uploading && <span className="ml-2 text-xs text-amber-700">{t("upload.extracting")}</span>}
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -274,7 +276,7 @@ export default function UploadPage() {
                 >
                   {item.staged
                     ? `${FORMAT_ICONS[item.staged.format] ?? "📄"} ${item.staged.filename}`
-                    : item.error ?? "上传中…"}
+                    : item.error ?? t("upload.uploadingFile")}
                   <button className="ml-1 text-stone-400 hover:text-red-600" onClick={() => removeItem(item.key)}>
                     ✕
                   </button>
@@ -282,20 +284,20 @@ export default function UploadPage() {
               ))}
             </div>
             {hasErrors && (
-              <div className="mt-2 text-xs text-red-600">有文件上传失败（网络问题），已自动忽略，可移除后重试。</div>
+              <div className="mt-2 text-xs text-red-600">{t("upload.hasErrors")}</div>
             )}
           </div>
 
           {/* 包信息（一个包，一张表单） */}
           <div className="rounded-xl border border-stone-200 bg-white p-4">
-            <div className="mb-3 text-sm font-semibold text-stone-700">资料包信息</div>
+            <div className="mb-3 text-sm font-semibold text-stone-700">{t("upload.pkgInfo")}</div>
             <div className="mb-4">
               <div className="mb-1.5 text-sm font-medium text-stone-700">
-                包名<span className="ml-1 text-xs font-normal text-stone-400">{stagedItems.length > 1 ? "（多文件包需命名）" : ""}</span>
+                {t("upload.pkgName")}<span className="ml-1 text-xs font-normal text-stone-400">{stagedItems.length > 1 ? t("upload.multiFileNote") : ""}</span>
               </div>
               <Input
                 value={title}
-                placeholder={stagedItems.length > 1 ? "如：架构评审会议" : "单文件包默认文件名，可修改"}
+                placeholder={stagedItems.length > 1 ? t("upload.namePhMulti") : t("upload.namePhSingle")}
                 onChange={(e) => {
                   setTitle(e.target.value);
                   setTitleTouched(true);

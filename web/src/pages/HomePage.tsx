@@ -4,8 +4,10 @@ import { api, type ShelvesDetail, type Stats } from "@zzlibrary/shared/client";
 import { Button, PageHeader, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
+import { useT } from "../i18n/lang";
 
 export default function HomePage() {
+  const t = useT();
   const [stats, setStats] = useState<Stats | null>(null);
   const [shelvesByL1, setShelvesByL1] = useState<Record<string, ShelvesDetail>>({});
   const tree = useCategories((s) => s.tree);
@@ -21,7 +23,7 @@ export default function HomePage() {
     void api
       .stats()
       .then(setStats)
-      .catch((err) => push("error", err instanceof Error ? err.message : "统计加载失败"));
+      .catch((err) => push("error", err instanceof Error ? err.message : t("home.statsFail")));
   }, [push]);
 
   // 概览卡：SQL 聚合计数的轻载荷（零包体零 N+1），并行拉取；失败不再静默吞掉（卡片缺位至少有提示）
@@ -35,7 +37,7 @@ export default function HomePage() {
       ),
     ).then((rows) => {
       const ok = rows.filter((r): r is [number, ShelvesDetail] => r !== null);
-      if (ok.length === 0 && tree.length > 0) push("error", "分类概览加载失败");
+      if (ok.length === 0 && tree.length > 0) push("error", t("home.overviewFail"));
       setShelvesByL1(Object.fromEntries(ok));
     });
   }, [tree, push]);
@@ -46,21 +48,21 @@ export default function HomePage() {
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
       <PageHeader
-        title="馆藏"
+        title={t("home.title")}
         actions={
           <Link to="/upload">
-            <Button>＋ 入库</Button>
+            <Button>{t("home.add")}</Button>
           </Link>
         }
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard icon="📦" label="资料包" value={totalPackages} />
-        <StatCard icon="🗂" label="文件总数" value={totalFiles} />
-        <StatCard icon="🏷" label="一级分类" value={tree.length} />
+        <StatCard icon="📦" label={t("home.statPkg")} value={totalPackages} />
+        <StatCard icon="🗂" label={t("home.statFiles")} value={totalFiles} />
+        <StatCard icon="🏷" label={t("home.statL1")} value={tree.length} />
         <StatCard
           icon="🔖"
-          label="二级分类"
+          label={t("home.statL2")}
           value={tree.reduce((acc, n) => acc + n.children.length, 0)}
         />
       </div>
@@ -71,17 +73,17 @@ export default function HomePage() {
         ) : (
           <div className="rounded-xl border border-stone-200 bg-white p-8 text-center">
             <div className="text-4xl">🏛</div>
-            <div className="mt-2 text-sm font-medium text-stone-700">欢迎来到你的个人资料库</div>
+            <div className="mt-2 text-sm font-medium text-stone-700">{t("home.welcome")}</div>
             <ol className="mx-auto mt-3 max-w-md list-decimal space-y-1 pl-6 text-left text-xs leading-6 text-stone-600">
-              <li>到「分类」页建立一/二/三级分类（也可以先跳过，入库后再整理）</li>
-              <li>到「入库」页上传文件——多个文件（如录屏+PPT+纪要）可合并为一个「资料包」</li>
-              <li>需要按年/十年/自定义区间切层时，在「时间分段」页配置</li>
+              <li>{t("home.step1")}</li>
+              <li>{t("home.step2")}</li>
+              <li>{t("home.step3")}</li>
             </ol>
           </div>
         )
       ) : (
         <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-stone-700">一级分类概览</h2>
+          <h2 className="text-sm font-semibold text-stone-700">{t("home.overview")}</h2>
           {tree.map((node) => {
             const shelves = shelvesByL1[String(node.id)];
             const l2Count = node.children.length;
@@ -95,24 +97,24 @@ export default function HomePage() {
                   <span className="text-xl">🏛</span>
                   <div>
                     <div className="text-sm font-semibold text-stone-800">{node.name}</div>
-                    <div className="text-xs text-stone-500">{l2Count} 个二级分类</div>
+                    <div className="text-xs text-stone-500">{t("home.l2Count", { n: l2Count })}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-6 text-sm">
                   <div className="text-right">
                     <div className="font-semibold text-amber-800">{shelves?.total ?? "…"}</div>
-                    <div className="text-xs text-stone-400">资料包</div>
+                    <div className="text-xs text-stone-400">{t("home.statPkg")}</div>
                   </div>
                   {shelves && (
                     <div className="hidden gap-1.5 md:flex">
                       {shelves.groups.slice(0, 3).map((g, i) => (
                         <span key={i} className="rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">
-                          {g.l2?.name ?? "未分类"} · {g.total}
+                          {t("home.groupChip", { name: g.l2?.name ?? t("common.uncategorized"), n: g.total })}
                         </span>
                       ))}
                     </div>
                   )}
-                  <span className="text-stone-400">进入书架 →</span>
+                  <span className="text-stone-400">{t("home.enter")}</span>
                 </div>
               </Link>
             );

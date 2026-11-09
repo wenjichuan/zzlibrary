@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePanToScroll } from "../hooks/panScroll";
 import { SERIF, type RackVM } from "./shelfVM";
+import { t } from "../i18n/lang";
 import { ViewHint } from "./ui";
 
 const SIDE_W = 208; // 书架（侧视）宽 px
@@ -55,7 +56,7 @@ export function AisleView({
     <div className="flex h-full flex-col bg-paper">
       {/* 说明放滚动区外（界面文字不随横/纵滚动滑动，也不作为拖拽起点），与正面时间轴口径一致；手机/矮视口隐藏让位书架 */}
       <ViewHint className="px-8 pb-1 pt-5 text-[13px] text-stone-600" style={{ fontFamily: SERIF }}>
-        侧视 · 填充条=相对藏书量 · 拖拽=浏览全部书架 · 滚轮=上下浏览 · 点击书架=正面时间轴
+        {t("aisle.hint")}
       </ViewHint>
       <div
         ref={scrollRef}
@@ -106,7 +107,7 @@ function BookcaseSide({
       onClick={onSelect}
       className="group relative block shrink-0 rounded-[6px] p-0 text-left transition-all hover:-translate-y-1 hover:shadow-[0_14px_34px_rgba(74,54,26,0.3)]"
       style={{ width: SIDE_W }}
-      title={`进入「${rack.label}」正面时间轴`}
+      title={t("aisle.enterRack", { name: rack.label })}
     >
       {/* 顶牌：二级分类名（铜牌）+ 数量填充条（相对全场最大书架） */}
       <div
@@ -123,7 +124,7 @@ function BookcaseSide({
           <span className="truncate text-[14px] font-semibold tracking-[0.08em] text-wood-deep">
             {rack.label}
           </span>
-          <span className="ml-2 shrink-0 text-[10px] text-[#57431f]">{rack.total} 包</span>
+          <span className="ml-2 shrink-0 text-[10px] text-[#57431f]">{t("common.nPkgs", { n: rack.total })}</span>
         </span>
         <span
           className="mt-1 h-[3px] rounded-full bg-[#3d2c12]/55"
@@ -155,7 +156,7 @@ function BookcaseSide({
                   border: "1px solid #c9b58c",
                   boxShadow: "inset 0 1px 0 rgba(255,252,240,0.8), 0 1px 2px rgba(70,50,20,0.3)",
                 }}
-                title={`${floor.label} · ${floor.total} 包`}
+                title={t("aisle.floorTitle", { name: floor.label, n: floor.total })}
               >
                 <span className="flex items-baseline justify-between">
                   <span className="truncate text-[13px] tracking-[0.1em] text-wood-ink">
@@ -185,7 +186,7 @@ function BookcaseSide({
       </div>
 
       <span className="pointer-events-none absolute -top-2.5 left-1/2 -translate-x-1/2 rounded-full bg-[#3d2c12] px-2.5 py-0.5 text-[10px] text-amber-100 opacity-0 transition-opacity group-hover:opacity-100">
-        正面时间轴 →
+        {t("aisle.front")}
       </span>
     </button>
   );

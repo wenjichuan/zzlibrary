@@ -2,6 +2,7 @@
  * EPUB=foliate-js（CFI 定位）· PDF=pdfjs-dist（页码）· TXT/MD/HTML/docx=文档渲染 ·
  * 图片/音频/视频=原生（播放百分比）。进度节流写回 PUT /api/progress，关闭时冲刷。 */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/lang";
 import { formatKind, isReadableFormat } from "@zzlibrary/core";
 import { api } from "@zzlibrary/shared/client";
 import type { FileDetail, PackageDetail, Progress } from "@zzlibrary/shared/client";
@@ -110,8 +111,8 @@ export default function ReaderOverlay({ pkgTitle, file, initialProgress, onClose
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-stone-100">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-4">
-        <button className="rounded-lg px-2 py-1 text-stone-500 hover:bg-stone-100 hover:text-stone-800" onClick={() => void requestClose()} title="返回（Esc）">
-          ← 返回
+        <button className="rounded-lg px-2 py-1 text-stone-500 hover:bg-stone-100 hover:text-stone-800" onClick={() => void requestClose()} title={t("reader.back")}>
+          {t("reader.backBtn")}
         </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-stone-800" title={file.name}>{file.name}</div>
@@ -119,7 +120,7 @@ export default function ReaderOverlay({ pkgTitle, file, initialProgress, onClose
         </div>
         {initialProgress !== null && (
           <button className="rounded-lg px-2 py-1 text-xs text-stone-400 hover:bg-stone-100 hover:text-red-600" onClick={() => void resetProgress()}>
-            重置进度
+            {t("reader.resetProgress")}
           </button>
         )}
         <span className="w-12 text-right text-xs tabular-nums text-stone-400">{percent}%</span>
@@ -149,7 +150,7 @@ export default function ReaderOverlay({ pkgTitle, file, initialProgress, onClose
             )}
             {!isReadableFormat(file.format) && (
               <div className="flex h-full items-center justify-center text-sm text-stone-400">
-                该格式（{file.format.toUpperCase()}）不支持内置阅读，可在详情页下载原图
+                {t("reader.unreadable", { fmt: file.format.toUpperCase() })}
               </div>
             )}
           </>
@@ -190,7 +191,7 @@ function EpubReader({
         view = v;
         viewRef.current = v as never;
         const resp = await fetch(api.fileUrl(file.id), { credentials: "include" });
-        if (!resp.ok) throw new Error(`取回文件失败（${resp.status}）`);
+        if (!resp.ok) throw new Error(t("reader.fetchFail", { status: resp.status }));
         const blob = await resp.blob();
         const bookFile = new File([blob], file.name, { type: blob.type || "application/epub+zip" });
         const book = await makeBook(bookFile);
@@ -217,7 +218,7 @@ function EpubReader({
         if (Array.isArray(bookToc)) walk(bookToc as never, 0);
         setToc(flat);
       } catch (err) {
-        if (!dead) setError(err instanceof Error ? err.message : "打开 EPUB 失败");
+        if (!dead) setError(err instanceof Error ? err.message : t("reader.epubFail"));
       }
     })();
     return () => {
@@ -254,18 +255,18 @@ function EpubReader({
       <div ref={hostRef} className="h-full" />
       {/* 工具条 */}
       <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white/95 px-2 py-1 shadow-lg">
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.prev()} title="上一页（←）" aria-label="上一页">←</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.prev()} title={t("reader.prevPage")} aria-label={t("reader.prevPage")}>←</button>
         {toc.length > 0 && (
-          <button className="rounded-full px-3 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => onToc(!showToc)}>目录</button>
+          <button className="rounded-full px-3 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => onToc(!showToc)}>{t("reader.toc")}</button>
         )}
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setFontSize((s) => Math.max(12, s - 1))} title="缩小">A−</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setFontSize((s) => Math.max(12, s - 1))} title={t("reader.zoomOut")}>A−</button>
         <span className="w-8 text-center text-xs tabular-nums text-stone-400">{fontSize}</span>
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setFontSize((s) => Math.min(28, s + 1))} title="放大">A+</button>
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.next()} title="下一页（→）" aria-label="下一页">→</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => setFontSize((s) => Math.min(28, s + 1))} title={t("reader.zoomIn")}>A+</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => viewRef.current?.next()} title={t("reader.nextPage")} aria-label={t("reader.nextPage")}>→</button>
       </div>
       {showToc && (
         <div className="absolute inset-y-0 left-0 w-72 overflow-y-auto border-r border-stone-200 bg-white p-3 shadow-xl">
-          <div className="mb-2 text-sm font-semibold text-stone-700">目录</div>
+          <div className="mb-2 text-sm font-semibold text-stone-700">{t("reader.toc")}</div>
           {toc.map((item, i) => (
             <button
               key={`${item.href}-${i}`}
@@ -312,7 +313,7 @@ function PdfReader({
         const startPage = typeof initialProgress?.locator?.page === "number" ? initialProgress.locator.page : 1;
         setDocState({ page: Math.min(Math.max(1, startPage), doc.numPages), numPages: doc.numPages, scale: 1 });
       } catch (err) {
-        if (!dead) setError("打开 PDF 失败：" + (err instanceof Error ? err.message : "未知错误"));
+        if (!dead) setError(t("reader.pdfFail", { msg: err instanceof Error ? err.message : String(err) }));
       }
     })();
     return () => {
@@ -354,7 +355,7 @@ function PdfReader({
       } catch (err) {
         // 快速翻页/缩放会取消在途任务（RenderingCancelledException）——预期路径不报错
         const cancelled = err instanceof Error && err.name === "RenderingCancelledException";
-        if (!dead && !cancelled) setError("PDF 渲染失败，请重试");
+        if (!dead && !cancelled) setError(t("reader.pdfRenderFail"));
       }
     })();
     return () => {
@@ -386,20 +387,20 @@ function PdfReader({
     return () => window.removeEventListener("keydown", onKey);
   }, [turn]);
 
-  if (page === 0) return <div className="flex h-full items-center justify-center text-sm text-stone-400">PDF 载入中…</div>;
+  if (page === 0) return <div className="flex h-full items-center justify-center text-sm text-stone-400">{t("reader.pdfLoading")}</div>;
   return (
     <>
       <div ref={wrapRef} className="h-full overflow-auto p-4">
         <canvas ref={canvasRef} className="mx-auto rounded-lg bg-white shadow" />
       </div>
       <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white/95 px-2 py-1 shadow-lg">
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => turn(-1)} title="上一页（←）">←</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => turn(-1)} title={t("reader.prevPage")}>←</button>
         <span className="px-1 text-xs tabular-nums text-stone-500">{page} / {numPages}</span>
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => turn(1)} title="下一页（→）">→</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" onClick={() => turn(1)} title={t("reader.nextPage")}>→</button>
         <span className="mx-1 h-4 w-px bg-stone-200" />
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" aria-label="缩小" onClick={() => setDocState((s) => s && { ...s, scale: Math.max(0.5, s.scale - 0.2) })}>−</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" aria-label={t("reader.zoomOut")} onClick={() => setDocState((s) => s && { ...s, scale: Math.max(0.5, s.scale - 0.2) })}>−</button>
         <span className="w-10 text-center text-xs tabular-nums text-stone-400">{Math.round(scale * 100)}%</span>
-        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" aria-label="放大" onClick={() => setDocState((s) => s && { ...s, scale: Math.min(3, s.scale + 0.2) })}>＋</button>
+        <button className="rounded-full px-2.5 py-1 text-sm text-stone-600 hover:bg-stone-100" aria-label={t("reader.zoomIn")} onClick={() => setDocState((s) => s && { ...s, scale: Math.min(3, s.scale + 0.2) })}>＋</button>
       </div>
     </>
   );
@@ -409,7 +410,7 @@ function PdfReader({
 
 async function fetchText(file: FileDetail): Promise<string> {
   const resp = await fetch(api.fileUrl(file.id), { credentials: "include" });
-  if (!resp.ok) throw new Error(`文件取回失败（HTTP ${resp.status}）`);
+  if (!resp.ok) throw new Error(t("reader.fetchFailHttp", { status: resp.status }));
   const buf = await resp.arrayBuffer();
   const bytes = new Uint8Array(buf);
   let label = "utf-8";
@@ -471,7 +472,7 @@ function TextReader({
         }, 0);
         setReady(true);
       } catch (err) {
-        if (!dead) setError(err instanceof Error ? err.message : "打开文本失败");
+        if (!dead) setError(err instanceof Error ? err.message : t("reader.textFail"));
       }
     })();
     return () => {
@@ -504,7 +505,7 @@ function TextReader({
 
   return (
     <div className="h-full overflow-y-auto px-6 py-8">
-      {!ready && <div className="text-center text-sm text-stone-400">载入中…</div>}
+      {!ready && <div className="text-center text-sm text-stone-400">{t("common.loading")}</div>}
       <div ref={ref} className={ready ? "min-h-full" : "hidden"} />
     </div>
   );
@@ -535,7 +536,7 @@ function DocReader({
           html = await marked.parse(text);
         } else if (file.format === "docx") {
           const resp = await fetch(api.fileUrl(file.id), { credentials: "include" });
-          if (!resp.ok) throw new Error(`文件取回失败（HTTP ${resp.status}）`);
+          if (!resp.ok) throw new Error(t("reader.fetchFailHttp", { status: resp.status }));
           const buf = await resp.arrayBuffer();
           const mammoth = await import("mammoth");
           const result = await mammoth.convertToHtml({ arrayBuffer: buf });
@@ -576,7 +577,7 @@ function DocReader({
         boxRef.current?.appendChild(iframe);
         setReady(true);
       } catch (err) {
-        if (!dead) setError(err instanceof Error ? err.message : "打开文档失败");
+        if (!dead) setError(err instanceof Error ? err.message : t("reader.docFail"));
       }
     })();
     return () => {
@@ -608,7 +609,7 @@ function DocReader({
 
   return (
     <div ref={wrapRef} className="h-full overflow-y-auto bg-stone-50">
-      {!ready && <div className="text-center text-sm text-stone-400">载入中…</div>}
+      {!ready && <div className="text-center text-sm text-stone-400">{t("common.loading")}</div>}
       <div ref={boxRef} className={ready ? "min-h-full" : "hidden"} />
     </div>
   );

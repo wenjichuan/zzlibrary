@@ -9,8 +9,10 @@ import { buildRackVMs, l2KeyOfRack, type RackVM } from "../components/shelfVM";
 import { Empty, Spinner } from "../components/ui";
 import { useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
+import { useT } from "../i18n/lang";
 
 export default function LibraryPage() {
+  const t = useT();
   const { l1Id } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<ShelvesDetail | null>(null);
@@ -51,8 +53,8 @@ export default function LibraryPage() {
       .catch((err) => {
         if (reqGen.current !== gen) return;
         // 网络失败≠分类不存在：给真错误态而非误导性空态
-        setLoadError(err instanceof Error ? err.message : "加载失败");
-        push("error", err instanceof Error ? err.message : "加载失败");
+        setLoadError(err instanceof Error ? err.message : t("common.loadFail"));
+        push("error", err instanceof Error ? err.message : t("common.loadFail"));
       })
       .finally(() => {
         if (reqGen.current === gen) setLoading(false);
@@ -79,7 +81,7 @@ export default function LibraryPage() {
       .catch((err) => {
         if (reqGen.current !== gen) return;
         setSelectedRack(null); // 失败退回侧视——避免卡在「正在上架…」且无返回按钮
-        push("error", err instanceof Error ? err.message : "加载失败");
+        push("error", err instanceof Error ? err.message : t("common.loadFail"));
       });
   };
 
@@ -93,7 +95,7 @@ export default function LibraryPage() {
       setRackVMs((prev) => patchPackageStatus(prev, pkgId, fresh.status));
     } catch (err) {
       if (reqGen.current !== gen) return;
-      push("error", err instanceof Error ? err.message : "加载失败");
+      push("error", err instanceof Error ? err.message : t("common.loadFail"));
     }
   };
 
@@ -110,7 +112,7 @@ export default function LibraryPage() {
   }, [detailPkg]);
 
   if (loading && !data) {
-    return <Spinner text="正在搭建书架…" />;
+    return <Spinner text={t("lib.building")} />;
   }
 
   if (loadError !== null) {
@@ -118,8 +120,8 @@ export default function LibraryPage() {
       <div className="flex h-full items-center justify-center">
         <Empty
           icon="📡"
-          title="书架加载失败"
-          hint={`${loadError}——检查服务是否在运行后重试`}
+          title={t("lib.loadFailTitle")}
+          hint={t("lib.loadFailHint", { msg: loadError })}
         />
       </div>
     );
@@ -130,8 +132,8 @@ export default function LibraryPage() {
       <div className="flex h-full items-center justify-center">
         <Empty
           icon="🏛"
-          title={l1 ? `「${l1.name}」下还没有资料包` : "这个分类不存在"}
-          hint="先到「入库」页上传资料包，并给它们挂上这个一级分类"
+          title={l1 ? t("lib.emptyTitle", { name: l1.name }) : t("lib.noCat")}
+          hint={t("lib.emptyHint")}
         />
       </div>
     );
@@ -154,16 +156,16 @@ export default function LibraryPage() {
           >
             {tree.map((n) => (
               <option key={n.id} value={n.id}>
-                {n.name}（{n.children.length} 组）
+                {t("lib.nGroups", { name: n.name, n: n.children.length })}
               </option>
             ))}
             {tree.length === 0 && <option value={l1Id}>{data.l1.name}</option>}
           </select>
           <span className="text-sm font-semibold text-stone-700">{data.l1.name}</span>
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{data.total} 包</span>
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{t("common.nPkgs", { n: data.total })}</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
-          {([["aisle", "排视图"], ["timeline", "时间轴"]] as const).map(([key, label]) => {
+          {([["aisle", t("lib.viewAisle")], ["timeline", t("lib.viewTimeline")]] as const).map(([key, label]) => {
             const active = key === "aisle" ? !currentRack : !!currentRack;
             return (
               <span
@@ -192,7 +194,7 @@ export default function LibraryPage() {
             }}
           />
         ) : selectedRack !== null ? (
-          <div className="flex h-full items-center justify-center text-sm text-stone-400">正在上架…</div>
+          <div className="flex h-full items-center justify-center text-sm text-stone-400">{t("lib.racking")}</div>
         ) : (
           <AisleView racks={racks} onRackSelect={handleRackSelect} />
         )}
@@ -220,18 +222,19 @@ function PackageDrawer({
   onClose: () => void;
   onRead: (f: FileDetail) => void;
 }) {
+  const t = useT();
   return (
     <div className="absolute inset-y-0 right-0 z-30 flex w-full flex-col overflow-y-auto border-l border-stone-200 bg-white/95 shadow-2xl backdrop-blur sm:w-96">
       <div className="sticky top-0 flex items-center justify-between border-b border-stone-200 bg-white px-4 py-3">
-        <h3 className="truncate text-sm font-semibold text-stone-800">包详情</h3>
-        <button aria-label="关闭详情" className="rounded p-1.5 text-stone-400 hover:bg-stone-100" onClick={onClose}>
+        <h3 className="truncate text-sm font-semibold text-stone-800">{t("lib.drawerTitle")}</h3>
+        <button aria-label={t("lib.closeDetail")} className="rounded p-1.5 text-stone-400 hover:bg-stone-100" onClick={onClose}>
           ✕
         </button>
       </div>
       <div className="space-y-4 p-4">
         <PackageDetailBody detail={pkg} onRead={onRead} />
         <Link to="/packages" className="block text-center text-xs text-stone-500 hover:text-amber-700">
-          在资料包列表中管理 →
+          {t("lib.manage")}
         </Link>
       </div>
     </div>

@@ -1,5 +1,6 @@
 /** 基础 UI 组件。 */
 import { useEffect, useRef } from "react";
+import { useT } from "../i18n/lang";
 
 export function Button({
   variant = "primary",
@@ -74,6 +75,7 @@ export function Modal({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   // onClose 常为内联箭头函数——经 ref 取用，effect 只挂一次（否则每次父渲染都会触发还焦逻辑）
@@ -129,7 +131,7 @@ export function Modal({
         <div className="sticky top-0 flex items-center justify-between border-b border-stone-200 bg-white px-5 py-3.5">
           <h2 className="text-base font-semibold text-stone-800">{title}</h2>
           <button
-            aria-label="关闭"
+            aria-label={t("ui.close")}
             className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
             onClick={onClose}
           >
@@ -171,10 +173,11 @@ export function PageShell({
 }
 
 export function Spinner({ text }: { text?: string }) {
+  const t = useT();
   return (
     <div className="flex items-center justify-center gap-2 py-10 text-sm text-stone-500">
       <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-300 border-t-amber-700" />
-      {text ?? "加载中…"}
+      {text ?? t("common.loading")}
     </div>
   );
 }
