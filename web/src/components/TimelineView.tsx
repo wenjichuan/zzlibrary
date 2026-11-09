@@ -46,6 +46,10 @@ interface SpineHoverHandlers {
 /** 立柱宽 = 架签列 + 左留白。留白是视图层概念（引擎输出的长卷坐标不含它）。 */
 const RAIL_W = LABEL_W + 20;
 
+/** 竖排架签的计数括注：vertical-rl 是 CJK 排版上下文，两种语言都用全角括号——
+ * 半角括号+前导空格在竖排里会被横排旋转，与末字重叠溢出（parens() 只用于横排场景）。 */
+const chipCount = (n: number | string): string => `（${n}）`;
+
 function Spine({
   pkg,
   left,
@@ -401,7 +405,7 @@ export function TimelineView({
     const label =
       fa.floor.label.length > 6 ? fa.floor.label.slice(0, 6) + "…" : fa.floor.label;
     const n = axis === "publish" ? fa.floor.dated.length : fa.floor.total;
-    return textWidth(`${label}${parens(String(n))}`, 13) * 1.18 + 6; // vertical-rl 竖排：字高≈文本宽
+    return textWidth(`${label}${chipCount(n)}`, 13) * 1.18 + 6; // vertical-rl 竖排：字高≈文本宽
   };
   // 层体高（有书=书高+10；空层=矮位 0.6 倍）——行高计算/立柱占位/层体渲染三处共用，公式单源
   const floorBodyH = (fa: (typeof floorAxes)[number]) => (fa.books.length > 0 ? bookH + 10 : bookH * 0.6);
@@ -579,7 +583,7 @@ export function TimelineView({
                   >
                     {floor.label.length > 6 ? floor.label.slice(0, 6) + "…" : floor.label}
                     <span className="text-[10px] tracking-normal text-wood-mid">
-                      {parens(String(axis === "publish" ? floor.dated.length : floor.total))}
+                      {chipCount(axis === "publish" ? floor.dated.length : floor.total)}
                     </span>
                   </div>
                   {segMenu === fi && (
