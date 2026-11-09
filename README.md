@@ -32,7 +32,7 @@ docker run -d --name zzlibrary -p 8000:8000 \
   ghcr.io/wenobug/zzlibrary:latest
 ```
 
-**Or a plain zip (no Docker needed):** grab the latest [`zzlibrary-server-*.zip`](../../releases), unzip, install [Node.js ≥ 22.5](https://nodejs.org), double-click `start-windows.bat` (or `./start-linux.sh`). Open `http://localhost:8000`, default account `admin / zzlibrary`.
+**Or a plain zip (no Docker needed):** grab the latest [`zzlibrary-server-*.zip`](../../releases) for your platform — `…-win-x64.zip`, `…-linux-x64.zip` or `…-linux-arm64.zip` (Raspberry Pi & other ARM boards) — unzip, install [Node.js ≥ 22.5](https://nodejs.org), double-click `start-windows.bat` (or `./start-linux.sh`). Open `http://localhost:8000`, default account `admin / zzlibrary`.
 
 Every device on your LAN (phone, tablet) can open the same library at `http://<server-ip>:8000`.
 

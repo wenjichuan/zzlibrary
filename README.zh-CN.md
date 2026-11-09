@@ -32,7 +32,7 @@ docker run -d --name zzlibrary -p 8000:8000 \
   ghcr.io/wenobug/zzlibrary:latest
 ```
 
-**或 zip 直跑（不需要 Docker）**：下载最新的 [`zzlibrary-server-*.zip`](../../releases)，解压，安装 [Node.js ≥ 22.5](https://nodejs.org)，双击 `start-windows.bat`（或 `./start-linux.sh`）。浏览器打开 `http://localhost:8000`，默认账号 `admin / zzlibrary`。
+**或 zip 直跑（不需要 Docker）**：下载最新的 [`zzlibrary-server-*.zip`](../../releases)，按平台选 `…-win-x64.zip` / `…-linux-x64.zip` / `…-linux-arm64.zip`（树莓派等 ARM），解压，安装 [Node.js ≥ 22.5](https://nodejs.org)，双击 `start-windows.bat`（或 `./start-linux.sh`）。浏览器打开 `http://localhost:8000`，默认账号 `admin / zzlibrary`。
 
 局域网内的手机/平板用 `http://<服务器IP>:8000` 访问同一座馆。
 
