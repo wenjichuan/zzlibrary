@@ -10,7 +10,7 @@ zzlibrary is a self-hosted personal library: your documents shelved like real bo
 
 ![Shelf view](docs/screenshots/shelf.png)
 
-## Why
+## Features
 
 File managers make you *remember where things are*. zzlibrary makes your collection *legible at a glance*:
 
