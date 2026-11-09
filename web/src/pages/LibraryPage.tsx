@@ -163,14 +163,14 @@ export default function LibraryPage() {
           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{data.total} 包</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
-          {(["排视图", "时间轴"] as const).map((label) => {
-            const active = label === "排视图" ? !currentRack : !!currentRack;
+          {([["aisle", "排视图"], ["timeline", "时间轴"]] as const).map(([key, label]) => {
+            const active = key === "aisle" ? !currentRack : !!currentRack;
             return (
               <span
-                key={label}
+                key={key}
                 className={`rounded-lg px-3 py-1.5 ${
                   active ? "bg-amber-700 text-white" : "bg-white text-stone-500 border border-stone-200"
-                } ${label === "时间轴" && !currentRack ? "opacity-50" : ""}`}
+                } ${key === "timeline" && !currentRack ? "opacity-50" : ""}`}
               >
                 {label}
               </span>

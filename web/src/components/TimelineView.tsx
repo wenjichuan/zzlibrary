@@ -14,6 +14,7 @@ import {
   dayOf,
   placeholderColor,
   prettyDate,
+  statusLabel,
   toUtc,
   yearLabel,
   yearNum,
@@ -170,7 +171,7 @@ function SpinePreviewCard({ pkg, axis }: { pkg: ShelfPackage; axis: "publish" | 
           <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-amber-800">
             {pkg.file_count} 文件
           </span>
-          <span className="rounded-full bg-stone-100 px-1.5 py-0.5 text-stone-600">{pkg.status}</span>
+          <span className="rounded-full bg-stone-100 px-1.5 py-0.5 text-stone-600">{statusLabel(pkg.status)}</span>
         </div>
       </div>
     </div>

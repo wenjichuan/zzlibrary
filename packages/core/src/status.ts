@@ -13,8 +13,8 @@ export interface StatusFileInput {
   percent: number | null;
 }
 
-/** 任一可读文件在读→在读；全部可读文件读完→已读；全未读→未读。
- *
+/** 任一可读文件在读→reading；全部可读文件读完→done；全未读→unread。
+ * 返回语言无关键（DB/API 存储值，显示层负责翻译）。
  * 不可读格式（无阅读深度，如 zip/bin 等未知格式，及暂无内置阅览的 pptx/xlsx）中性，不参与聚合；
  * 无可读文件的包 status=""（界面显示「—」）。
  */
@@ -22,12 +22,12 @@ export function computePackageStatus(files: StatusFileInput[]): string {
   const states: string[] = [];
   for (const f of files) {
     if (!isReadableFormat(f.format)) continue;
-    if (f.percent === null) states.push("未读");
-    else if (f.percent >= READ_DONE_THRESHOLD) states.push("已读");
-    else states.push("在读");
+    if (f.percent === null) states.push("unread");
+    else if (f.percent >= READ_DONE_THRESHOLD) states.push("done");
+    else states.push("reading");
   }
   if (states.length === 0) return "";
-  if (states.every((s) => s === "已读")) return "已读";
-  if (states.some((s) => s === "在读")) return "在读";
-  return "未读";
+  if (states.every((s) => s === "done")) return "done";
+  if (states.some((s) => s === "reading")) return "reading";
+  return "unread";
 }

@@ -90,6 +90,13 @@ export function l2KeyOfRack(rackKey: string): string {
 
 /* ---------- 日期/展示纯函数 ---------- */
 
+/** 包状态键 → 显示词（i18n 前置：DB/API 存语言无关键，显示层负责翻译；
+ * C3 接入字典后此表改由 t() 提供）。未知值原样透出。 */
+const STATUS_LABELS: Record<string, string> = { unread: "未读", reading: "在读", done: "已读" };
+export function statusLabel(s: string): string {
+  return STATUS_LABELS[s] ?? s;
+}
+
 export const SERIF = `"Noto Serif SC", "Songti SC", SimSun, serif`;
 
 export function placeholderColor(id: number): string {

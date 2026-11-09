@@ -148,7 +148,7 @@ describe("入库两步", () => {
     expect(r.json.tags).toEqual(["测试"]);
     expect(r.json.classifications[0].l2.name).toBe("古代文明");
     expect(r.json.file_count).toBe(2);
-    expect(r.json.status).toBe("未读");
+    expect(r.json.status).toBe("unread");
   });
 
   it("无公元 0 年 → 422", async () => {
@@ -196,10 +196,10 @@ describe("进度与状态机", () => {
     const detail = await call("GET", `/api/packages/${pid}`);
     const fid = detail.json.files[0].id;
     await call("PUT", `/api/progress/${fid}`, { locator: { offset: 10 }, percent: 40 });
-    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("在读");
+    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("reading");
     await call("PUT", `/api/progress/${fid}`, { locator: { offset: 20 }, percent: 100 });
-    // 另一文件未读 → 包整体回「未读」（一已读+一未读 = 未读）
-    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("未读");
+    // 另一文件未读 → 包整体回 unread（一已读+一未读 = 未读）
+    expect((await call("GET", `/api/packages/${pid}`)).json.status).toBe("unread");
   });
 });
 

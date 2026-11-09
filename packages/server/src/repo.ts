@@ -191,9 +191,9 @@ export function recomputeAllPackageStatuses(db: DatabaseSync): number {
   const readable = [...FORMATS.values()].filter((f) => f.readable).map((f) => `'${f.format}'`).join(",");
   const target = `
     CASE WHEN n = 0 THEN ''
-         WHEN m = 2 THEN '在读'
-         WHEN m = 0 THEN '已读'
-         ELSE '未读' END`;
+         WHEN m = 2 THEN 'reading'
+         WHEN m = 0 THEN 'done'
+         ELSE 'unread' END`;
   const result = pstmt(
     db,
     `WITH agg AS (

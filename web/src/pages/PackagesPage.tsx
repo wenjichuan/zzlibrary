@@ -5,7 +5,7 @@ import PackageMetaForm, { metaFromPackage, metaToInput, type MetaFormValue } fro
 import { Button, Empty, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 import { flatten, useCategories } from "../stores/categories";
 import { useToast } from "../stores/toast";
-import { prettyDate } from "../components/shelfVM";
+import { prettyDate, statusLabel } from "../components/shelfVM";
 import { useReaderOverlay } from "../components/ReaderOverlay";
 import PackageDetailBody, { fmtPath } from "../components/PackageDetailBody";
 import { FORMAT_ICONS } from "../components/FileRow";
@@ -13,7 +13,7 @@ import { renderPdfCover } from "../utils/pdfCover";
 
 /** 格式筛选选项从 core 格式注册表派生（全量规范名），勿手抄清单 */
 const FORMATS = ["", ...CANONICAL_FORMATS];
-const STATUSES = ["", "未读", "在读", "已读"];
+const STATUSES = ["", "unread", "reading", "done"];
 const SORTS: Record<string, string> = {
   newest: "最新入库",
   oldest: "最早入库",
@@ -212,7 +212,7 @@ export default function PackagesPage() {
         </Select>
         <Select className="w-full sm:w-24" value={filters.status} onChange={(e) => applyFilters((f) => ({ ...f, status: e.target.value }))}>
           {STATUSES.map((s) => (
-            <option key={s} value={s}>{s || "全部状态"}</option>
+            <option key={s} value={s}>{s ? statusLabel(s) : "全部状态"}</option>
           ))}
         </Select>
         <Select className="w-full sm:w-28" value={filters.undated} onChange={(e) => applyFilters((f) => ({ ...f, undated: e.target.value }))}>
@@ -277,14 +277,14 @@ export default function PackagesPage() {
                   <td className="px-4 py-2.5">
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs ${
-                        pkg.status === "已读"
+                        pkg.status === "done"
                           ? "bg-emerald-100 text-emerald-700"
-                          : pkg.status === "在读"
+                          : pkg.status === "reading"
                             ? "bg-amber-100 text-amber-800"
                             : "bg-stone-100 text-stone-500"
                       }`}
                     >
-                      {pkg.status || "—"}
+                      {statusLabel(pkg.status) || "—"}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-right text-xs">

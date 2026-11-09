@@ -306,7 +306,7 @@ packagesRouter.post("/api/packages", async (c) => {
         (meta.publisher ?? "").trim() || null,
         JSON.stringify(cleanList(meta.tags)),
         meta.notes ?? null,
-        "未读",
+        "unread",
         nowSqlite(),
         nowSqlite(),
         randomUUID().replaceAll("-", ""),
@@ -409,7 +409,7 @@ packagesRouter.get("/api/packages", (c) => {
   }
   const statusFilter = c.req.query("status");
   if (statusFilter) {
-    if (!["未读", "在读", "已读"].includes(statusFilter)) {
+    if (!["unread", "reading", "done"].includes(statusFilter)) {
       throw new HTTPException(422, { message: "状态筛选无效" });
     }
     conds.push("packages.status = ?");

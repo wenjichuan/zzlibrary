@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { prettyDisplayDate } from "@zzlibrary/core";
 import { api, formatBytes, type FileDetail, type PackageDetail } from "@zzlibrary/shared/client";
 import FileRow from "./FileRow";
+import { statusLabel } from "./shelfVM";
 
 /** 分类路径显示（l1/l2/l3 用 / 连接）——全应用单源（详情体与资料包表格共用）。 */
 export function fmtPath(p: { l1?: { name: string } | null; l2?: { name: string } | null; l3?: { name: string } | null }): string {
@@ -58,7 +59,7 @@ export default function PackageDetailBody({
           <Info label="发布时间" value={prettyDisplayDate(detail.publish_date)} />
           {detail.publisher && <Info label="发布方" value={detail.publisher} />}
           <Info label="体量" value={`${detail.file_count} 个文件 · ${formatBytes(detail.total_size)}`} />
-          <Info label="状态" value={detail.status || "—"} />
+          <Info label="状态" value={statusLabel(detail.status) || "—"} />
           {detail.tags.length > 0 && <Info label="标签" value={detail.tags.join("，")} />}
           {detail.notes && <Info label="备注" value={detail.notes} />}
           {metaExtra && <div className="pt-2">{metaExtra}</div>}

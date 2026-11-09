@@ -149,22 +149,22 @@ describe("computePackageStatus", () => {
   it("聚合规则与不可读中性", () => {
     expect(computePackageStatus([])).toBe("");
     expect(computePackageStatus([{ format: "zip", percent: null }])).toBe(""); // 不可读不参与
-    expect(computePackageStatus([{ format: "pdf", percent: null }])).toBe("未读");
-    expect(computePackageStatus([{ format: "pdf", percent: 10 }])).toBe("在读");
-    expect(computePackageStatus([{ format: "pdf", percent: 98.5 }])).toBe("已读");
+    expect(computePackageStatus([{ format: "pdf", percent: null }])).toBe("unread");
+    expect(computePackageStatus([{ format: "pdf", percent: 10 }])).toBe("reading");
+    expect(computePackageStatus([{ format: "pdf", percent: 98.5 }])).toBe("done");
     expect(
       computePackageStatus([
         { format: "pdf", percent: 99 },
         { format: "epub", percent: 30 },
       ]),
-    ).toBe("在读");
+    ).toBe("reading");
     expect(
       computePackageStatus([
         { format: "pdf", percent: 100 },
         { format: "epub", percent: null },
         { format: "bin", percent: 50 }, // 中性
       ]),
-    ).toBe("未读");
+    ).toBe("unread");
   });
 });
 
