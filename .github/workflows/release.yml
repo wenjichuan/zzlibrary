@@ -8,11 +8,29 @@ permissions:
   contents: write
   packages: write
 
+env:
+  # gh CLI 认证与目标（草稿直传/发布收口共用）
+  GH_TOKEN: ${{ github.token }}
+  REPO: ${{ github.repository }}
+  TAG: ${{ github.ref_name }}
+
 jobs:
+  # 草稿先行：Release 立即创建（自动日志此刻生成）；各打包腿直传 zip，绕开 artifact 中转
+  # （download-artifact 对本仓库已两连挂——actions artifact 服务偶发不可用）。
+  # 幂等：重跑时 view 命中即跳过创建。
+  draft:
+    name: 创建草稿 Release
+    runs-on: ubuntu-latest
+    steps:
+      # 幂等：已存在（重跑）则 view 命中跳过创建
+      - run: gh release view "$TAG" --repo "$REPO" || gh release create "$TAG" --repo "$REPO" --draft --generate-notes --title "$TAG"
+        shell: bash
+
   # 三平台并行出 zip：sharp 原生件随构建机自动选择（build-release.mjs 按 process.platform/arch 过滤），
-  # 文件名自带平台后缀（…-win-x64 / linux-x64 / linux-arm64），汇总无碰撞
+  # 文件名自带平台后缀（…-win-x64 / linux-x64 / linux-arm64），直传草稿无碰撞
   package:
     name: zip · ${{ matrix.zipname }}
+    needs: draft
     runs-on: ${{ matrix.runs-on }}
     strategy:
       fail-fast: false
@@ -32,11 +50,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/build-release.mjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: zip-${{ matrix.zipname }}
-          path: dist-release/*.zip
-          if-no-files-found: error
+      # 直传草稿（--clobber 兜住重跑覆盖）；windows 默认 pwsh 不展开 glob，统一 bash
+      - run: gh release upload "$TAG" dist-release/*.zip --clobber
+        shell: bash
 
   # Docker 多架构镜像（自包含构建，与 zip 并行）：QEMU 出 arm64
   docker:
@@ -47,7 +63,7 @@ jobs:
       - name: Docker 多架构前置（buildx + QEMU）
         uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-      # GHCR 登录：build-push-action 不自动认证，匿名推必 403（v1.0.0 首跑实锤）
+      # GHCR 登录：build-push-action 不自动认证，匿名推必 403
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -63,17 +79,11 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/zzlibrary:latest
             ghcr.io/${{ github.repository_owner }}/zzlibrary:${{ github.ref_name }}
 
-  # 汇总：三份 zip 合并到 dist-release/（merge 摊平，文件名天然区分）→ 挂到 GitHub Release
-  release:
-    name: GitHub Release
+  # 收口：zip 与镜像全部成功后发布（草稿转正）；幂等可重跑
+  publish:
+    name: 发布 Release
     needs: [package, docker]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist-release
-          merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist-release/*.zip
-          generate_release_notes: true
+      - run: gh release edit "$TAG" --repo "$REPO" --draft=false
+        shell: bash
