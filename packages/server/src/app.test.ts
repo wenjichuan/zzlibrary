@@ -135,6 +135,15 @@ describe("入库两步", () => {
     sid1 = r.json.stage_id;
   });
 
+  it("stage 中文文件名按 UTF-8 还原（不乱码）", async () => {
+    const form = new FormData();
+    form.append("file", new Blob(["一行正文\n"]), "测试·文件名.txt");
+    const r = await call("POST", "/api/packages/stage", form);
+    expect(r.status).toBe(200);
+    expect(r.json.filename).toBe("测试·文件名.txt");
+    expect(r.json.meta.title).toBe("一行正文"); // txt 规则：首行做标题
+  });
+
   it("stage md：# 标题抽取", async () => {
     const form = new FormData();
     form.append("file", new Blob(["# 马克笔记标题\n正文"]), "note.md");

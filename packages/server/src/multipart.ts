@@ -20,6 +20,12 @@ export function boundaryOf(contentType: string): string | null {
 
 const HEADER_CAP = 16 * 1024; // part 头上限（防畸形请求耗内存）
 
+/** 文件名解码：part 头整体按 latin1 匹配捕获，但浏览器/undici 均以 UTF-8 原始字节
+ * 下发 filename=，需按 UTF-8 还原（latin1 捕获是字节 1:1 映射，无损可逆；ASCII 原样）。 */
+function utf8Filename(s: string): string {
+  return /[^\x00-\x7f]/.test(s) ? Buffer.from(s, "latin1").toString("utf8") : s;
+}
+
 export async function streamMultipart(
   body: ReadableStream<Uint8Array>,
   contentType: string,
@@ -41,11 +47,18 @@ export async function streamMultipart(
     const text = headerBytes.toString("latin1");
     headerBytes = Buffer.alloc(0);
     const nameM = /name="([^"]*)"/.exec(text);
+    const fileStarM = /filename\*=(?:utf-8|UTF-8)''([^;\r\n]+)/.exec(text);
     const fileM = /filename="([^"]*)"/.exec(text);
     const ctM = /content-type:\s*([^\r\n]+)/i.exec(text);
     await sink.onPartHeader({
       name: nameM === null ? "" : nameM[1]!,
-      filename: fileM === null ? undefined : fileM[1],
+      // filename*=（RFC 5987 百分号编码）优先于 filename=
+      filename:
+        fileStarM !== null
+          ? decodeURIComponent(fileStarM[1]!)
+          : fileM === null
+            ? undefined
+            : utf8Filename(fileM[1]!),
       contentType: ctM === null ? undefined : ctM[1]!.trim(),
     });
     inPart = true;
