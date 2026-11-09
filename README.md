@@ -36,7 +36,37 @@ docker run -d --name zzlibrary -p 8000:8000 \
 
 Every device on your LAN (phone, tablet) can open the same library at `http://<server-ip>:8000`.
 
-Deployment details, environment variables and **security notes** (change the default password; don't expose directly to the public internet — use Tailscale/WireGuard): see the deployment guide [DEPLOY.md](DEPLOY.md) (in Chinese; the Docker/zip snippets above cover the basics).
+## Deployment
+
+### Where the data lives / backup
+
+- Everything sits in one folder: `<unzipped>/data/` (metadata DB `library.db`, original files `files/`, covers & spines `art/`)
+- **Backup = copy the whole data folder**, or use in-app *Settings → Back up the library* to write a consistent snapshot anywhere (external drives included)
+- Docker: everything lands in the mounted `/data` volume — back up that volume
+- Upgrading: stop the server → overwrite `dist-server/` and `web/` from the new unzipped release (leave `data/` untouched) → start again
+
+### Environment variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ZZLIB_DATA_DIR` | `<unzipped>/data` | Data directory (can point to another disk) |
+| `ZZLIB_PORT` / `PORT` | `8000` | Listen port |
+| `ZZLIB_USERNAME` / `ZZLIB_PASSWORD` | `admin` / `zzlibrary` | Login (**change the password**) |
+| `ZZLIB_ROOT` | auto | App root (parent of `dist-server`; rarely needed) |
+| `ZZLIB_WEB_DIST` | auto | Web UI directory (rarely needed) |
+
+### ⚠️ Security notes
+
+- The server is **single-account session auth**, aimed at personal/home LAN use — **do not expose it to the public internet unprotected**
+- **Change the default password immediately** after first start: set `ZZLIB_PASSWORD` (a `pbkdf2$iterations$salt$hash` value is supported)
+- For remote access prefer **Tailscale/WireGuard** (encrypted tunnel, zero public exposure, no filing/registration needed)
+- If you must expose it publicly: HTTPS reverse proxy (Caddy/Nginx) + a strong password + IP allowlist — at your own risk
+
+### FAQ
+
+- **Port already in use**: set `ZZLIB_PORT=8001` or free the port
+- **Phone can't reach it**: same network? Is the port allowed through the firewall? (On Windows, allow it on *Private networks* when prompted)
+- **Forgot the password**: start with `ZZLIB_PASSWORD=<new>` to reset it
 
 ## Roadmap
 

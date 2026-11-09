@@ -56,9 +56,10 @@ exec node dist-server/index.js
 `;
 await (await import("node:fs")).promises.writeFile(join(STAGE, "start-linux.sh"), sh, { mode: 0o755 }, "utf-8");
 
-// 部署说明
-const deploy = await (await import("node:fs")).promises.readFile(join(ROOT, "DEPLOY.md"), "utf-8");
-await (await import("node:fs")).promises.writeFile(join(STAGE, "部署说明.md"), deploy, "utf-8");
+// 自述（部署章节已内联进两份 README，各自语言完整；不再单独产出部署说明）
+for (const f of ["README.zh-CN.md", "README.md", "LICENSE"]) {
+  await (await import("node:fs")).promises.copyFile(join(ROOT, f), join(STAGE, f));
+}
 
 console.log("④ 压缩 zip");
 const files = [];
