@@ -69,6 +69,28 @@ describe("认证", () => {
     expect(r.json.detail).toBe("用户名或密码错误");
   });
 
+  it("Accept-Language: en → 英文消息（缺省 zh）", async () => {
+    const en = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json", "accept-language": "en-US,en;q=0.9" },
+      body: JSON.stringify({ username: "admin", password: "wrong" }),
+    });
+    expect(en.status).toBe(401);
+    expect(await en.json()).toMatchObject({ detail: "Wrong username or password" });
+    // 键式深层抛出（repo 的 err.pkgNotFound）也按请求语言翻译
+    const cookie0 = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: "zzlibrary" }),
+    });
+    const sc = cookie0.headers.get("set-cookie")!.split(";")[0];
+    const nf = await app.request("/api/packages/999999", { headers: { cookie: sc, "accept-language": "en" } });
+    expect(nf.status).toBe(404);
+    expect(await nf.json()).toMatchObject({ detail: "Package not found" });
+    const nfZh = await app.request("/api/packages/999999", { headers: { cookie: sc } });
+    expect(((await nfZh.json()) as { detail: string }).detail).toBe("资料包不存在");
+  });
+
   it("登录成功并建立会话", async () => {
     const r = await call("POST", "/api/auth/login", { username: "admin", password: "zzlibrary" });
     expect(r.status).toBe(200);

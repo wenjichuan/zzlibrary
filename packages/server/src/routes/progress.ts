@@ -2,6 +2,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env";
+import { msg } from "../i18n";
 import { getProgress, progressOut, recomputePackageStatus } from "../repo";
 import { nowSqlite } from "../db";
 
@@ -11,7 +12,7 @@ progressRouter.get("/api/progress/:fileId", (c) => {
   const db = c.get("db");
   const fileId = Number(c.req.param("fileId"));
   const f = db.prepare("SELECT id FROM files WHERE id = ?").get(fileId);
-  if (!f) throw new HTTPException(404, { message: "文件不存在" });
+  if (!f) throw new HTTPException(404, { message: msg(c, "file.notFound") });
   return c.json(progressOut(getProgress(db, fileId)));
 });
 
@@ -21,14 +22,14 @@ progressRouter.put("/api/progress/:fileId", async (c) => {
   const f = db.prepare("SELECT id, package_id FROM files WHERE id = ?").get(fileId) as
     | { id: number; package_id: number }
     | undefined;
-  if (!f) throw new HTTPException(404, { message: "文件不存在" });
+  if (!f) throw new HTTPException(404, { message: msg(c, "file.notFound") });
   const payload = await c.req
     .json<{ locator?: Record<string, unknown>; percent?: number }>()
     .catch(() => ({}) as never);
   const locator = payload.locator ?? {};
   const percent = payload.percent;
   if (typeof percent !== "number" || !(0 <= percent && percent <= 100)) {
-    throw new HTTPException(422, { message: "percent 需在 0~100" });
+    throw new HTTPException(422, { message: msg(c, "prog.percentRange") });
   }
   const existing = getProgress(db, fileId);
   if (existing === null) {
@@ -55,8 +56,8 @@ progressRouter.delete("/api/progress/:fileId", (c) => {
   const f = db.prepare("SELECT id, package_id FROM files WHERE id = ?").get(fileId) as
     | { id: number; package_id: number }
     | undefined;
-  if (!f) throw new HTTPException(404, { message: "文件不存在" });
-  if (getProgress(db, fileId) === null) throw new HTTPException(404, { message: "该文件没有进度记录" });
+  if (!f) throw new HTTPException(404, { message: msg(c, "file.notFound") });
+  if (getProgress(db, fileId) === null) throw new HTTPException(404, { message: msg(c, "prog.noProgress") });
   db.prepare("DELETE FROM reading_progress WHERE file_id = ?").run(fileId);
   recomputePackageStatus(db, f.package_id);
   return c.json({ ok: true });

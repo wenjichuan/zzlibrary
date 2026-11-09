@@ -3,6 +3,7 @@
  * 逐块扫描边界，内容经 onChunk 顺序回调（await 背压天然成立——慢消费者暂停读取）；
  * 处理跨块的边界串（尾部保留策略）；支持多 part、per-part filename/content-type、
  * 结束边界 --boundary--。仅供 stage 上传端点使用（浏览器/undici 生成的规范格式）。 */
+import { HTTPException } from "hono/http-exception";
 
 export interface MultipartSink {
   /** part 头解析完毕（此后该 part 的内容块经 onChunk 到来） */
@@ -25,7 +26,7 @@ export async function streamMultipart(
   sink: MultipartSink,
 ): Promise<void> {
   const boundary = boundaryOf(contentType);
-  if (boundary === null || boundary === "") throw new Error("multipart boundary 缺失");
+  if (boundary === null || boundary === "") throw new HTTPException(400, { message: "err.multipartBoundary" });
   const dashBoundary = Buffer.from(`--${boundary}`);
   const crlfDashBoundary = Buffer.from(`\r\n--${boundary}`);
   const CRLF = Buffer.from("\r\n");
@@ -78,18 +79,18 @@ export async function streamMultipart(
           state = "headers";
           continue;
         }
-        throw new Error("multipart 格式异常（边界后定界符）");
+        throw new HTTPException(400, { message: "err.multipartMalformed" });
       }
       if (state === "headers") {
         const i = buf.indexOf(Buffer.concat([CRLF, CRLF]));
         if (i < 0) {
           headerBytes = Buffer.concat([headerBytes, buf]);
-          if (headerBytes.length > HEADER_CAP) throw new Error("multipart part 头超限");
+          if (headerBytes.length > HEADER_CAP) throw new HTTPException(413, { message: "err.multipartHeaderCap" });
           buf = Buffer.alloc(0);
           break;
         }
         headerBytes = Buffer.concat([headerBytes, buf.subarray(0, i)]);
-        if (headerBytes.length > HEADER_CAP) throw new Error("multipart part 头超限");
+        if (headerBytes.length > HEADER_CAP) throw new HTTPException(413, { message: "err.multipartHeaderCap" });
         buf = buf.subarray(i + 4);
         await emitHeaders();
         state = "body";
@@ -116,6 +117,6 @@ export async function streamMultipart(
     if (done) break;
     buf = buf.length === 0 ? Buffer.from(value) : Buffer.concat([buf, Buffer.from(value)]);
   }
-  if (inPart) throw new Error("multipart 意外截断（缺少结束边界）");
+  if (inPart) throw new HTTPException(400, { message: "err.multipartTruncated" });
   await reader.cancel().catch(() => undefined);
 }

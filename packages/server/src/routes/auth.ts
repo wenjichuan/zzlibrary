@@ -2,6 +2,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env";
+import { msg } from "../i18n";
 import { verifyPassword } from "../security";
 
 export const authRouter = new Hono<Env>();
@@ -12,7 +13,7 @@ authRouter.post("/api/auth/login", async (c) => {
   const password = payload.password ?? "";
   const settings = c.get("settings");
   if (username !== settings.username || !verifyPassword(password, settings.password)) {
-    throw new HTTPException(401, { message: "用户名或密码错误" });
+    throw new HTTPException(401, { message: msg(c, "auth.badCredentials") });
   }
   c.get("sessions").setCookie(c, username);
   return c.json({ username });

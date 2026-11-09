@@ -12,7 +12,7 @@ import {
 } from "@zzlibrary/core";
 import type { Env } from "../env";
 import { getCategory, type CategoryRow } from "../deps";
-import { displayI18nOf, langOf } from "../i18n";
+import { displayI18nOf, langOf, msgFor, type Lang } from "../i18n";
 import type { ShelvesDetail } from "@zzlibrary/shared";
 import { isoFromSqlite } from "../db";
 import type { PackageRow } from "../repo";
@@ -103,18 +103,18 @@ function buildLightShelves(db: Env["Variables"]["db"], l1: CategoryRow, i18n: Di
 
 shelvesRouter.get("/api/shelves/:l1Id/overview", (c) => {
   const db = c.get("db");
-  const l1 = l1Or404(db, Number(c.req.param("l1Id")));
+  const l1 = l1Or404(db, Number(c.req.param("l1Id")), langOf(c));
   return c.json(buildLightShelves(db, l1, displayI18nOf(langOf(c))) satisfies ShelvesDetail);
 });
 
 /** 单架详情（正面时间轴入口）：只装载该二级组的包（formats 批量聚合），进架才拉包体。 */
 shelvesRouter.get("/api/shelves/:l1Id/rack", (c) => {
   const db = c.get("db");
-  const l1 = l1Or404(db, Number(c.req.param("l1Id")));
+  const l1 = l1Or404(db, Number(c.req.param("l1Id")), langOf(c));
   const l2Raw = c.req.query("l2") ?? "";
   const l2None = l2Raw === "none";
   const l2Id = l2None ? null : Number(l2Raw);
-  if (!l2None && !Number.isInteger(l2Id)) throw new HTTPException(422, { message: "l2 需为数字 id 或 none" });
+  if (!l2None && !Number.isInteger(l2Id)) throw new HTTPException(422, { message: msgFor(langOf(c), "shelves.l2Param") });
 
   const cond = l2None ? "pp.l1_id = ? AND pp.l2_id IS NULL" : "pp.l1_id = ? AND pp.l2_id = ?";
   const args: Array<number> = l2None ? [l1.id] : [l1.id, l2Id!];
@@ -196,10 +196,10 @@ function collectCats(db: Env["Variables"]["db"], pkgs: AggPackage[]): Map<number
   return cats;
 }
 
-function l1Or404(db: Env["Variables"]["db"], l1Id: number): CategoryRow {
-  const c = getCategory(db, l1Id);
-  if (c === null || c.level !== 1) throw new HTTPException(404, { message: "一级分类不存在" });
-  return c;
+function l1Or404(db: Env["Variables"]["db"], l1Id: number, lang: Lang): CategoryRow {
+  const cat = getCategory(db, l1Id);
+  if (cat === null || cat.level !== 1) throw new HTTPException(404, { message: msgFor(lang, "shelves.l1NotFound") });
+  return cat;
 }
 
 interface RawPkg extends PackageRow {}
