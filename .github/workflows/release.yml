@@ -9,8 +9,21 @@ permissions:
   packages: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  # 三平台并行出 zip：sharp 原生件随构建机自动选择（build-release.mjs 按 process.platform/arch 过滤），
+  # 文件名自带平台后缀（…-win-x64 / linux-x64 / linux-arm64），汇总无碰撞
+  package:
+    name: zip · ${{ matrix.zipname }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            zipname: linux-x64
+          - runs-on: ubuntu-24.04-arm
+            zipname: linux-arm64
+          - runs-on: windows-latest
+            zipname: win-x64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,8 +31,19 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: 构建 release zip（bundle + web + 启动脚本）
-        run: node scripts/build-release.mjs
+      - run: node scripts/build-release.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-${{ matrix.zipname }}
+          path: dist-release/*.zip
+          if-no-files-found: error
+
+  # Docker 多架构镜像（自包含构建，与 zip 并行）：QEMU 出 arm64
+  docker:
+    name: 镜像 → GHCR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Docker 多架构前置（buildx + QEMU）
         uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -32,8 +56,18 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/zzlibrary:latest
             ghcr.io/${{ github.repository_owner }}/zzlibrary:${{ github.ref_name }}
-      - name: GitHub Release 挂 zip
-        uses: softprops/action-gh-release@v2
+
+  # 汇总：三份 zip 合并到 dist-release/（merge 摊平，文件名天然区分）→ 挂到 GitHub Release
+  release:
+    name: GitHub Release
+    needs: [package, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
         with:
           files: dist-release/*.zip
           generate_release_notes: true
