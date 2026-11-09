@@ -3,7 +3,17 @@ name: Pages
 on:
   push:
     branches: [develop]
-    paths: ["site/**", ".github/workflows/pages.yml"]
+    paths:
+      - "site/**"
+      - "web/src/**"
+      - "web/index.html"
+      - "web/package.json"
+      - "packages/**"
+      - "scripts/demo-seed.mjs"
+      - "scripts/shoot-screens.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -23,6 +33,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # 截图环境字体：中文（Noto CJK）+ 侧栏 emoji
+      - name: Install CJK & emoji fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fonts-noto-color-emoji
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build -w web
+      - run: node scripts/build-server.mjs
+      # 空数据目录起 server → 灌演示库 → 双语拍 6 张进 site/assets/（脚本自带健康等待）
+      - name: Seed demo library & shoot screenshots
+        env:
+          ZZLIB_PORT: "8901"
+          ZZLIB_DATA_DIR: ${{ runner.temp }}/demo-data
+        run: |
+          node dist-server/index.js &
+          node scripts/demo-seed.mjs http://127.0.0.1:8901
+          node scripts/shoot-screens.mjs http://127.0.0.1:8901 site/assets
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

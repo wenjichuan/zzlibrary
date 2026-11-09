@@ -8,7 +8,7 @@
 
 zzlibrary is a self-hosted personal library: your documents shelved like real books — classification decides which bookcase, era decides where on the shelf, and every **package** (a "bound volume" holding any number of files in any format) stands as one spine. Browse your collection the way you browse a library, then read in place — EPUB, PDF, TXT, Markdown, HTML, docx, images, audio and video, with per-file reading progress that follows you.
 
-![Shelf view](docs/screenshots/en/shelf.png)
+![Shelf view](https://wenobug.github.io/zzlibrary/assets/en/shelf.png)
 
 ## Features
 
@@ -20,7 +20,7 @@ File managers make you *remember where things are*. zzlibrary makes your collect
 - **Own your safety net** — one-click full-library backup to any local folder (consistent snapshot + all files). Copy the data folder and you've moved the library.
 - **Fast at scale** — FTS5 full-text search, SQL-aggregated shelf overview, lazy-loaded racks. Tested with 100,000 packages.
 
-![Timeline view](docs/screenshots/en/timeline.png)
+![Timeline view](https://wenobug.github.io/zzlibrary/assets/en/timeline.png)
 
 ## Quick start
 

@@ -8,7 +8,7 @@
 
 zzlibrary 是自托管的个人资料库：资料像真书一样上架——分类决定它在哪座书架，年代决定它在架上排在哪儿，每个**资料包**（一份可装任意数量、任意格式文件的「合订本」）就是一格书脊。像逛图书馆一样浏览馆藏，随手抽一本原地开读：EPUB、PDF、TXT、Markdown、HTML、docx、图片、音频、视频，逐文件的阅读进度自动断点续读。
 
-![书架侧视](docs/screenshots/shelf.png)
+![书架侧视](https://wenobug.github.io/zzlibrary/assets/shelf.png)
 
 ## 特色
 
@@ -20,7 +20,7 @@ zzlibrary 是自托管的个人资料库：资料像真书一样上架——分�
 - **安全网在你手里**——一键「备份整库」到任意本机目录（一致性快照 + 全部文件）；整个数据目录拷走就是搬家。
 - **大规模也快**——FTS5 全文搜索、SQL 聚合书架概览、书架懒加载。十万包压测验证。
 
-![时间轴长卷](docs/screenshots/timeline.png)
+![时间轴长卷](https://wenobug.github.io/zzlibrary/assets/timeline.png)
 
 ## 快速开始
 

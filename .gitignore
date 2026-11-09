@@ -53,3 +53,6 @@ Thumbs.db
 # 发布产物
 dist-server/
 dist-release/
+
+# 落地页截图：由 scripts/shoot-screens.mjs 生成（CI 或本地），不入库
+site/assets/
