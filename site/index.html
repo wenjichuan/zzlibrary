@@ -81,7 +81,7 @@
   footer { padding: 36px 0 48px; text-align: center; color: var(--ink-soft); font-size: 13.5px; }
   footer .sep { margin: 0 10px; color: var(--line); }
 
-  [data-lang] { display: none; }
+  html[lang] [data-lang] { display: none; }
   html[lang="zh-CN"] [data-lang="zh"] { display: block; }
   html[lang="zh-CN"] [data-lang="zh"].inline { display: inline; }
   html[lang="en"] [data-lang="en"] { display: block; }
@@ -112,7 +112,8 @@
   </div>
   <div class="shot">
     <div class="bar"><i></i><i></i><i></i></div>
-    <img src="assets/shelf.png" alt="虚拟图书馆书架" />
+    <img src="assets/shelf.png" alt="虚拟图书馆书架" data-lang="zh" />
+    <img src="assets/en/shelf.png" alt="Virtual library shelves" data-lang="en" />
   </div>
 </div>
 
@@ -150,12 +151,14 @@
     <h2 class="title"><small data-lang="zh" class="inline">一览</small><small data-lang="en" class="inline">TOUR</small><span data-lang="zh" class="inline">在书架间穿行</span><span data-lang="en" class="inline">Wander the aisles</span></h2>
     <div class="gallery">
       <figure>
-        <img src="assets/timeline.png" alt="弹性时间轴长卷" loading="lazy" />
+        <img src="assets/timeline.png" alt="弹性时间轴长卷" data-lang="zh" loading="lazy" />
+        <img src="assets/en/timeline.png" alt="Elastic timeline" data-lang="en" loading="lazy" />
         <figcaption data-lang="zh">弹性时间轴长卷：2206 本的书脊墙，拖拽平移、悬停预览、点击进详情（演示数据为十万包压测库）。</figcaption>
         <figcaption data-lang="en">Elastic timeline scroll: a wall of 2,206 spines. Drag to pan, hover to preview, click for details (demo data from a 100k-package stress library).</figcaption>
       </figure>
       <figure>
-        <img src="assets/reader.png" alt="内置阅读器" loading="lazy" />
+        <img src="assets/reader.png" alt="内置阅读器" data-lang="zh" loading="lazy" />
+        <img src="assets/en/reader.png" alt="Built-in reader" data-lang="en" loading="lazy" />
         <figcaption data-lang="zh">内置 TXT 阅读器：进度条、断点续读、缩放；EPUB/PDF/音视频同等待遇。</figcaption>
         <figcaption data-lang="en">Built-in TXT reader with progress and resume; EPUB / PDF / media get the same treatment.</figcaption>
       </figure>
