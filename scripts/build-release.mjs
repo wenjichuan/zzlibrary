@@ -27,24 +27,26 @@ cpSync(join(ROOT, "dist-server"), join(STAGE, "dist-server"), { recursive: true 
 cpSync(join(ROOT, "web", "dist"), join(STAGE, "web", "dist"), { recursive: true });
 
 // 启动脚本（ZZLIB_ROOT 显式锚定；zip 解压到任意位置均可用——bundle 内置 dist-server 父目录根解析，双保险）
+// 必须纯 ASCII：cmd 在 chcp 切换代码页后会按新编码重定位批处理读取位置，UTF-8 中文行读偏即
+// "'[错误]' is not recognized"（v1.0.0 win 包实测）。中文说明走包内 README.zh-CN.md。
 const bat = `@echo off
-chcp 65001 >nul
-rem zzlibrary 服务端启动（需 Node 22.5+，推荐 24+）
-where node >nul 2>nul || (echo [错误] 未找到 Node，请先安装 Node.js 22.5 或更高版本 https://nodejs.org & pause & exit /b 1)
+rem zzlibrary server launcher - requires Node.js 22.5+
+where node >nul 2>nul || (echo [ERROR] Node.js not found. Install Node.js 22.5+ from https://nodejs.org & pause & exit /b 1)
 for /f "tokens=1 delims=v." %%v in ('node --version') do set NV=%%v
 if %NV% LSS 22 (
-  echo [错误] Node 版本过低（当前 v%NV%），需要 22.5+，请到 https://nodejs.org 升级
+  echo [ERROR] Node.js too old: v%NV%, need 22.5+. Get the latest from https://nodejs.org
   pause & exit /b 1
 )
 set ZZLIB_ROOT=%~dp0
 set ZZLIB_PORT=8000
-echo zzlibrary 服务端启动中 → http://localhost:8000  （数据目录：%~dp0data）
+echo zzlibrary server starting - http://localhost:8000  (data dir: %~dp0data)
 start "" http://localhost:8000
 node "%~dp0dist-server\\index.js"
 pause
 `;
 mkdirSync(join(STAGE), { recursive: true });
-await (await import("node:fs")).promises.writeFile(join(STAGE, "start-windows.bat"), bat.replace(/\n/g, "\r\n"), "utf-8");
+// \r?\n：本地工作区 CRLF 与 CI LF 出检出都能得到干净 CRLF（\n 直替换在 CRLF 下会产出 \r\r\n）
+await (await import("node:fs")).promises.writeFile(join(STAGE, "start-windows.bat"), bat.replace(/\r?\n/g, "\r\n"), "utf-8");
 
 const sh = `#!/bin/sh
 # zzlibrary 服务端启动（需 Node 22.5+，推荐 24+）
